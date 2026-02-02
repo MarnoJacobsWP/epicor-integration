@@ -1,43 +1,37 @@
-import fastify from 'fastify';
-import { options } from './src/app.js';
-import app from './src/app.js';
+import Fastify from 'fastify';
+import app from './app.js';
+import { options } from './app.js';
 
-async function start() {
-  const server = fastify(options);
-  
+const fastify = Fastify(options);
+
+const start = async () => {
   try {
-    await server.register(app);
-    
-    const PORT = 443;
-    const HOST = process.env.HOST || '0.0.0.0';
-    
-    await server.listen({
-      port: PORT,
-      host: HOST
-    });
-    
-    server.log.info(`Server running on port ${PORT}`);
-    
-    process.on('SIGINT', () => {
-      server.log.info('Received SIGINT. Shutting down gracefully...');
-      server.close(() => {
-        server.log.info('Server closed');
+
+    await fastify.register(app, options);
+
+    const host = process.env.HOST || '0.0.0.0';
+    const port = 443; 
+
+    await fastify.listen({ host, port });
+
+    console.log(`Server running in ${process.env.NODE_ENV} mode`);
+    console.log(`Server listening on https://${host}:${port}`);
+    console.log(`Health check: https://${host}:${port}/health`);
+
+    const signals = ['SIGINT', 'SIGTERM'];
+    signals.forEach(signal => {
+      process.on(signal, async () => {
+        console.log(`Received ${signal}, starting graceful shutdown...`);
+        await fastify.close();
+        console.log('Server closed gracefully');
         process.exit(0);
       });
     });
-    
-    process.on('SIGTERM', () => {
-      server.log.info('Received SIGTERM. Shutting down gracefully...');
-      server.close(() => {
-        server.log.info('Server closed');
-        process.exit(0);
-      });
-    });
-    
-  } catch (err) {
-    server.log.error('Error starting server:', err);
+
+  } catch (error) {
+    console.error('Error starting server:', error);
     process.exit(1);
   }
-}
+};
 
 start();
