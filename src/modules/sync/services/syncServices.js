@@ -147,11 +147,13 @@ async function syncService(fastify, _) {
     }
   }
 
-  fastify.decorate('syncService', {
-    getSyncStatus,
-    runFullSync,
-    task,
-  });
+  if (!fastify.hasDecorator('syncService')) {
+    fastify.decorate('syncService', {
+      getSyncStatus,
+      runFullSync,
+      task,
+    });
+  }
 }
 
 export default fp(syncService, {

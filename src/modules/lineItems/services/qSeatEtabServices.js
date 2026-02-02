@@ -382,10 +382,12 @@ async function qSeatEtabService(fastify, _) {
     }
   }
 
-  fastify.decorate('qSeatEtabService', {
-    syncLineItemsForQuoteWithData,
-    task,
-  });
+  if (!fastify.hasDecorator('qSeatEtabService')) {
+    fastify.decorate('qSeatEtabService', {
+      syncLineItemsForQuoteWithData,
+      task,
+    });
+  }
 }
 
 export default fp(qSeatEtabService, {

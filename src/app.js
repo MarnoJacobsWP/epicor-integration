@@ -105,6 +105,10 @@ export default async function app(fastify, opts) {
     ];
 
     for (const module of modules) {
+      if (fastify[`${module}Task`] || fastify[`${module}Service`]) {
+        fastify.log.debug(`Module ${module} already loaded, skipping...`);
+        continue;
+      }
       await fastify.register(AutoLoad, {
         dir: join(import.meta.url, `modules/${module}`),
         dirNameRoutePrefix: false,
@@ -114,7 +118,6 @@ export default async function app(fastify, opts) {
       });
     }
 
-    // Health endpoint with detailed checks
     fastify.get('/health', async (request, reply) => {
       const checks = {
         server: 'healthy',

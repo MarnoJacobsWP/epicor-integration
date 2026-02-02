@@ -384,10 +384,12 @@ async function quoteProdMixService(fastify, _) {
     }
   }
 
-  fastify.decorate('quoteProdMixService', {
-    syncLineItemsForQuoteWithData,
-    task,
-  });
+  if (!fastify.hasDecorator('quoteProdMixService')) {
+    fastify.decorate('quoteProdMixService', {
+      syncLineItemsForQuoteWithData,
+      task,
+    });
+  }
 }
 
 export default fp(quoteProdMixService, {

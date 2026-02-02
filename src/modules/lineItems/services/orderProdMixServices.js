@@ -382,10 +382,12 @@ async function orderProdMixService(fastify, _) {
     }
   }
 
-  fastify.decorate('orderProdMixService', {
-    syncLineItemsForOrder,
-    task,
-  });
+  if (!fastify.hasDecorator('orderProdMixService')) {
+    fastify.decorate('orderProdMixService', {
+      syncLineItemsForOrder,
+      task,
+    });
+  }
 }
 
 export default fp(orderProdMixService, {

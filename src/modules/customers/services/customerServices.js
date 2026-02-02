@@ -405,10 +405,12 @@ async function customerService(fastify, _) {
     }
   }
 
-  fastify.decorate('customerTask', { 
-    task,
-    processCustomerBatch
-  });
+  if (!fastify.hasDecorator('customerTask')) {
+    fastify.decorate('customerTask', { 
+      task,
+      processCustomerBatch
+    });
+  }
 }
 
 export default fp(customerService, {

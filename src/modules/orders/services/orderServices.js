@@ -395,7 +395,9 @@ async function orderService(fastify, _) {
     }
   }
 
-  fastify.decorate('orderTask', { task });
+  if (!fastify.hasDecorator('orderTask')) {
+    fastify.decorate('orderTask', { task });
+  }
 }
 
 export default fp(orderService, {

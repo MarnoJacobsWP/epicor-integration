@@ -362,10 +362,12 @@ async function contactService(fastify, _) {
     }
   }
 
-  fastify.decorate('contactTask', { 
-    task,
-    processContactBatch
-  });
+  if (!fastify.hasDecorator('contactTask')) {
+    fastify.decorate('contactTask', { 
+      task,
+      processContactBatch
+    });
+  }
 }
 
 export default fp(contactService, {

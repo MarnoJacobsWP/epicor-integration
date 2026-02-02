@@ -423,7 +423,9 @@ async function quoteService(fastify, _) {
     }
   }
 
-  fastify.decorate('quoteTask', { task });
+  if (!fastify.hasDecorator('quoteTask')) {
+    fastify.decorate('quoteTask', { task });
+  }
 }
 
 export default fp(quoteService, {
