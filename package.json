@@ -1,0 +1,37 @@
+{
+  "name": "epicor-hubspot-integration",
+  "version": "1.0.0",
+  "description": "Epicor to HubSpot Integration API",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development node src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint .",
+    "production": "NODE_ENV=production node src/server.js"
+  },
+  "keywords": ["epicor", "hubspot", "integration"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/autoload": "^5.0.0",
+    "@fastify/env": "^4.0.0",
+    "@fastify/mongodb": "^6.0.0",
+    "@fastify/rate-limit": "^8.0.0",
+    "@fastify/sensible": "^5.0.0",
+    "@fastify/under-pressure": "^8.0.0",
+    "axios": "^1.6.0",
+    "desm": "^1.2.0",
+    "fastify": "^4.0.0",
+    "fastify-plugin": "^4.0.0",
+    "luxon": "^3.4.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.53.0",
+    "pino-pretty": "^10.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

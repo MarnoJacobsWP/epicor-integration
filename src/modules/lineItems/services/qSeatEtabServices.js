@@ -1,0 +1,398 @@
+import fp from 'fastify-plugin';
+
+const FIELD_MAPPINGS = [
+  { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },
+  { epicor: 'ProdGrup_Description', hubspot: 'prodgrup_description' },
+  { epicor: 'QuoteDtl_PartNum', hubspot: 'quotedtl_partnum' },
+  { epicor: 'QuoteDtl_LineDesc', hubspot: 'quotedtl_linedesc' },
+  { epicor: 'QuoteDtl_OrderQty', hubspot: 'quotedtl_orderqty', transform: Number },
+  { epicor: 'RowIdent', hubspot: 'rowident' },
+];
+
+function transformEpicorToHubSpot(epicorRecord) {
+  const result = {};
+  for (const { epicor, hubspot, transform } of FIELD_MAPPINGS) {
+    const value = epicorRecord[epicor];
+    if (value != null) {
+      const transformed = transform ? transform(value) : value;
+      if (transformed != null) result[hubspot] = transformed;
+    }
+  }
+  return result;
+}
+
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function qSeatEtabService(fastify, _) {
+  const BATCH_SIZE = fastify.constants.BATCH_SIZES.LINE_ITEMS || 100;
+  const UNIQUE_PROPERTY = 'rowident';
+
+  async function infoRecord(data) {
+    return await fastify.lineItemRepository.findByIdProperty(data);
+  }
+
+  async function updateDataBase(filter, data) {
+    return await fastify.lineItemRepository.updateDatabase(filter, data);
+  }
+
+  async function createDataBase(data) {
+    return await fastify.lineItemRepository.insertDatabase(data);
+  }
+
+  async function deleteDataBase(filter) {
+    return await fastify.lineItemRepository.deleteDatabase(filter);
+  }
+
+  async function processLineItemBatch(lineItems, dealId) {
+    const results = {
+      total: lineItems.length,
+      created: 0,
+      updated: 0,
+      errors: 0,
+      errorDetails: [],
+      skipped: 0
+    };
+
+    const batchData = [];
+    
+    for (const lineItem of lineItems) {
+      try {
+        const rowident = lineItem.RowIdent;
+        if (!rowident) {
+          results.skipped++;
+          continue;
+        }
+
+        const rowidentStr = String(rowident).trim();
+        if (!rowidentStr) {
+          results.skipped++;
+          continue;
+        }
+
+        let properties = transformEpicorToHubSpot(lineItem);
+        properties.name = properties.prodgrup_description || 'Unnamed Product';
+        properties.hs_sku = properties.quotedtl_partnum;
+        properties.description = properties.quotedtl_linedesc;
+        properties.quantity = properties.quotedtl_orderqty || 0;
+        
+        if (!properties[UNIQUE_PROPERTY]) {
+          properties[UNIQUE_PROPERTY] = rowidentStr;
+        }
+        
+        const cleanProperties = {};
+        for (const [key, value] of Object.entries(properties)) {
+          if (value !== null && value !== undefined && value !== '') {
+            cleanProperties[key] = String(value).substring(0, 500);
+          }
+        }
+        
+        if (!cleanProperties[UNIQUE_PROPERTY]) {
+          results.skipped++;
+          continue;
+        }
+        
+        batchData.push({
+          id: rowidentStr,
+          properties: cleanProperties
+        });
+        
+      } catch (error) {
+        results.errors++;
+        results.errorDetails.push({
+          error: error.message,
+          lineItem: lineItem.RowIdent || 'Unknown'
+        });
+      }
+    }
+
+    if (batchData.length === 0) {
+      fastify.log.warn('No valid line item data for batch processing');
+      return results;
+    }
+
+    fastify.log.info(`Prepared ${batchData.length} QSeatEtab line items for batch upsert`);
+
+    try {
+      const upsertResult = await fastify.backoff(() =>
+        fastify.hubspotAdapter.batchUpsertLineItems(batchData, UNIQUE_PROPERTY)
+      );
+
+      if (upsertResult.status === 'COMPLETE' && upsertResult.results) {
+        for (const result of upsertResult.results) {
+          const rowident = result.properties?.[UNIQUE_PROPERTY];
+          const originalLineItem = lineItems.find(li => {
+            const liRowident = li.RowIdent;
+            return liRowident && String(liRowident).trim() === rowident;
+          });
+          
+          if (originalLineItem) {
+            const query = {
+              epicorId: originalLineItem.RowIdent,
+              source: 'EpicorQSeatEtab',
+            };
+
+            const dbData = {
+              hubspotId: result.id,
+              epicorId: originalLineItem.RowIdent,
+              source: 'EpicorQSeatEtab',
+              quoteNum: originalLineItem.QuoteDtl_QuoteNum,
+              action: result.new ? 'create' : 'update',
+              timestamp: new Date()
+            };
+
+            if (result.new) {
+              results.created++;
+            } else {
+              results.updated++;
+            }
+
+            let existRecord = await infoRecord(query);
+            
+            if (existRecord?.hubspotId) {
+              await updateDataBase(query, dbData);
+            } else {
+              await createDataBase(dbData);
+            }
+
+            if (result.new && dealId) {
+              try {
+                await fastify.backoff(() =>
+                  fastify.hubspotAdapter._makeRequest('PUT', 
+                    `/crm/v4/objects/line_items/${result.id}/associations/deals/${dealId}/20`
+                  )
+                );
+                fastify.log.debug(`Associated QSeatEtab line item ${result.id} to deal ${dealId}`);
+              } catch (error) {
+                fastify.log.error(`Failed to associate QSeatEtab line item ${result.id} to deal ${dealId}:`, error.message);
+              }
+            }
+          }
+        }
+      }
+
+      if (upsertResult.numErrors > 0 && upsertResult.errors) {
+        results.errors += upsertResult.numErrors;
+        upsertResult.errors.forEach(error => {
+          results.errorDetails.push({
+            error: error.message,
+            category: error.category,
+            status: error.status
+          });
+        });
+      }
+
+      fastify.log.info(`QSeatEtab batch processed: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
+
+    } catch (error) {
+      fastify.log.error(`QSeatEtab batch upsert failed: ${error.message}`, {
+        response: error.response?.data
+      });
+      
+      results.errors = batchData.length;
+      results.errorDetails.push({
+        error: error.message,
+        response: error.response?.data
+      });
+      
+      fastify.log.info('Falling back to individual processing...');
+      await processLineItemsIndividually(lineItems, dealId, results);
+    }
+
+    return results;
+  }
+
+  async function processLineItemsIndividually(lineItems, dealId, results) {
+    fastify.log.info(`Starting individual processing for ${lineItems.length} QSeatEtab line items...`);
+    
+    for (const lineItem of lineItems) {
+      const rowident = lineItem.RowIdent;
+
+      try {
+        const props = transformEpicorToHubSpot(lineItem);
+        props.name = props.prodgrup_description || 'Unnamed Product';
+        props.hs_sku = props.quotedtl_partnum;
+        props.description = props.quotedtl_linedesc;
+        props.quantity = props.quotedtl_orderqty || 0;
+
+        const cleanProps = {
+          name: props.name,
+          hs_sku: props.hs_sku,
+          description: props.description,
+          quantity: props.quantity,
+          rowident: props.rowident,
+          prodgrup_description: props.prodgrup_description
+        };
+
+        Object.keys(cleanProps).forEach(key => {
+          if (cleanProps[key] === null || cleanProps[key] === undefined) {
+            delete cleanProps[key];
+          }
+        });
+
+        const query = {
+          epicorId: lineItem.RowIdent,
+          source: 'EpicorQSeatEtab',
+        };
+
+        let existRecord = await infoRecord(query);
+
+        if (!existRecord) {
+          try {
+            const searchData = await fastify.backoff(() =>
+              fastify.hubspotAdapter.searchLineItems({
+                body: {
+                  filterGroups: [{ filters: [{ propertyName: 'rowident', operator: 'EQ', value: String(rowident) }] }],
+                  limit: 1,
+                  properties: ['rowident', 'name', 'hs_sku', 'description', 'quantity'],
+                },
+              })
+            );
+            existRecord = searchData.results?.[0] || null;
+          } catch (searchError) {
+            existRecord = null;
+          }
+        }
+
+        if (existRecord?.id || existRecord?.hubspotId) {
+          const lineItemId = existRecord?.hubspotId || existRecord?.id;
+
+          try {
+            await fastify.backoff(() =>
+              fastify.hubspotAdapter.updateLineItem(lineItemId, cleanProps)
+            );
+          } catch (error) {
+            if (error?.response?.data?.message?.toLowerCase() === 'resource not found') {
+              await deleteDataBase(query);
+              fastify.log.warn(`QSeatEtab line item ${rowident} deleted from DB`);
+              continue;
+            } else {
+              throw error;
+            }
+          }
+
+          if (existRecord?.hubspotId) {
+            await updateDataBase(query, { action: 'update' });
+          } else {
+            await createDataBase({
+              hubspotId: lineItemId,
+              epicorId: lineItem.RowIdent,
+              source: 'EpicorQSeatEtab',
+              quoteNum: lineItem.QuoteDtl_QuoteNum,
+              action: 'create'
+            });
+          }
+
+          results.updated++;
+        } else {
+          const associations = dealId ? [{
+            to: { id: dealId },
+            types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 20 }]
+          }] : [];
+
+          const created = await fastify.backoff(() =>
+            fastify.hubspotAdapter.createLineItem(cleanProps, associations)
+          );
+          const lineItemId = created.id;
+
+          await createDataBase({
+            hubspotId: lineItemId,
+            epicorId: lineItem.RowIdent,
+            source: 'EpicorQSeatEtab',
+            quoteNum: lineItem.QuoteDtl_QuoteNum,
+            action: 'create'
+          });
+
+          results.created++;
+        }
+
+      } catch (error) {
+        fastify.log.error(`QSeatEtab line item ${rowident} failed: ${error.message}`);
+        results.errors++;
+      }
+    }
+    
+    fastify.log.info(`QSeatEtab individual processing complete: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
+  }
+
+  async function syncLineItemsForQuoteWithData(quoteNum, dealId, quoteRecords) {
+    if (!quoteRecords.length) {
+      return { success: true, message: 'No E-Table/Seating line items for this quote', lineItemCount: 0 };
+    }
+
+    const lineItemMap = new Map();
+    for (const record of quoteRecords) {
+      const rowIdent = record.RowIdent;
+      if (!rowIdent) continue;
+      
+      const existing = lineItemMap.get(rowIdent);
+      if (!existing || (record.Calculated_Time && (!existing.Calculated_Time || record.Calculated_Time > existing.Calculated_Time))) {
+        lineItemMap.set(rowIdent, record);
+      }
+    }
+    
+    const uniqueRecords = Array.from(lineItemMap.values());
+    fastify.log.info(`Found ${uniqueRecords.length} unique QSeatEtab line items for quote ${quoteNum}`);
+
+    const batches = chunkArray(uniqueRecords, BATCH_SIZE);
+    const batchResults = [];
+    
+    for (let i = 0; i < batches.length; i++) {
+      fastify.log.info(`Processing QSeatEtab batch ${i + 1}/${batches.length} (${batches[i].length} line items)...`);
+      const result = await processLineItemBatch(batches[i], dealId);
+      batchResults.push(result);
+      
+      if (i < batches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    const totalResults = batchResults.reduce((acc, batch) => ({
+      total: acc.total + batch.total,
+      created: acc.created + batch.created,
+      updated: acc.updated + batch.updated,
+      errors: acc.errors + batch.errors,
+      skipped: acc.skipped + batch.skipped
+    }), { total: 0, created: 0, updated: 0, errors: 0, skipped: 0 });
+    
+    fastify.log.info(`QSeatEtab sync for quote ${quoteNum} complete: ${totalResults.created} created, ${totalResults.updated} updated, ${totalResults.errors} errors, ${totalResults.skipped} skipped`);
+
+    return {
+      success: true,
+      lineItemCount: uniqueRecords.length,
+      createdCount: totalResults.created,
+      updatedCount: totalResults.updated,
+      errorCount: totalResults.errors,
+      skippedCount: totalResults.skipped
+    };
+  }
+
+  async function task(dateString) {
+    try {
+      fastify.log.info('Processing Tasks for QSeatEtab Line Items');
+      return { success: true, message: 'QSeatEtab line items processed by quote service' };
+    } catch (error) {
+      fastify.log.error(`Error processing Tasks for QSeatEtab Line Items - ${error.message}`);
+      throw error;
+    }
+  }
+
+  fastify.decorate('qSeatEtabService', {
+    syncLineItemsForQuoteWithData,
+    task,
+  });
+}
+
+export default fp(qSeatEtabService, {
+  name: 'qSeatEtabService',
+  dependencies: [
+    'lineItemRepository',
+    'hubspotAdapter',
+    'backoff',
+  ],
+});
