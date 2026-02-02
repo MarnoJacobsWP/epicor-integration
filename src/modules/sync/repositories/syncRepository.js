@@ -36,14 +36,16 @@ async function findLastSync(collection, syncType) {
 async function syncRepository(fastify) {
   const collection = fastify.mongo.db.collection('sync_logs');
 
-  fastify.decorate('syncRepository', {
-    findByIdProperty: (idProperty) => findByIdProperty(collection, idProperty),
-    findByQuery: (query) => findByQuery(collection, query),
-    updateDatabase: (filter, data) => updateDatabase(collection, filter, data),
-    insertDatabase: (data) => insertDatabase(collection, data),
-    deleteDatabase: (filter) => deleteDatabase(collection, filter),
-    findLastSync: (syncType) => findLastSync(collection, syncType),
-  });
+  if (!fastify.hasDecorator('syncRepository')) {
+    fastify.decorate('syncRepository', {
+      findByIdProperty: (idProperty) => findByIdProperty(collection, idProperty),
+      findByQuery: (query) => findByQuery(collection, query),
+      updateDatabase: (filter, data) => updateDatabase(collection, filter, data),
+      insertDatabase: (data) => insertDatabase(collection, data),
+      deleteDatabase: (filter) => deleteDatabase(collection, filter),
+      findLastSync: (syncType) => findLastSync(collection, syncType),
+    });
+  }
 }
 
 export default fp(syncRepository, {

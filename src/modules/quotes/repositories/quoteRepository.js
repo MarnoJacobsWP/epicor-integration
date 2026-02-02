@@ -29,13 +29,15 @@ async function deleteDatabase(collection, filter) {
 async function quoteRepository(fastify) {
   const collection = fastify.mongo.db.collection('quotes');
 
-  fastify.decorate('quoteRepository', {
-    findByIdProperty: (idProperty) => findByIdProperty(collection, idProperty),
-    findByQuery: (query) => findByQuery(collection, query),
-    updateDatabase: (filter, data) => updateDatabase(collection, filter, data),
-    insertDatabase: (data) => insertDatabase(collection, data),
-    deleteDatabase: (filter) => deleteDatabase(collection, filter),
-  });
+  if (!fastify.hasDecorator('quoteRepository')) {
+    fastify.decorate('quoteRepository', {
+      findByIdProperty: (idProperty) => findByIdProperty(collection, idProperty),
+      findByQuery: (query) => findByQuery(collection, query),
+      updateDatabase: (filter, data) => updateDatabase(collection, filter, data),
+      insertDatabase: (data) => insertDatabase(collection, data),
+      deleteDatabase: (filter) => deleteDatabase(collection, filter),
+    });
+  }
 }
 
 export default fp(quoteRepository, {
