@@ -217,9 +217,20 @@ async function orderService(fastify, _) {
             try {
               const custNum = padCustNum(originalOrder.OrderHed_CustNum);
               if (custNum) {
-                const companySearch = await fastify.backoff(() =>
+                fastify.log.debug(`Searching for company with customer_custnum: ${custNum} for order ${orderNum}`);
+                let companySearch = await fastify.backoff(() =>
                   fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
                 );
+                
+                // If not found with padded value, try without leading zeros
+                if (!companySearch.results?.[0]?.id && custNum !== String(parseInt(custNum, 10))) {
+                  const unpaddedNum = String(parseInt(custNum, 10));
+                  fastify.log.debug(`No company found with padded custnum ${custNum}, trying unpadded: ${unpaddedNum}`);
+                  companySearch = await fastify.backoff(() =>
+                    fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [unpaddedNum])
+                  );
+                }
+                
                 if (companySearch.results?.[0]?.id) {
                   await fastify.hubspotAdapter.createAssociation(
                     'deals',
@@ -229,10 +240,20 @@ async function orderService(fastify, _) {
                     6
                   );
                   fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
+                } else {
+                  fastify.log.warn(`No company found for customer_custnum: ${custNum} (order ${orderNum}) - Original value: ${originalOrder.OrderHed_CustNum}`);
                 }
+              } else {
+                fastify.log.warn(`Order ${orderNum} has no customer number for association`);
               }
             } catch (associationError) {
-              fastify.log.warn(`Failed to associate order ${orderNum} to company: ${associationError.message}`);
+              const custNum = originalOrder.OrderHed_CustNum ? padCustNum(originalOrder.OrderHed_CustNum) : 'unknown';
+              fastify.log.error(`Failed to associate order ${orderNum} to company (custnum: ${custNum}):`, {
+                error: associationError.message,
+                status: associationError.response?.status,
+                statusText: associationError.response?.statusText,
+                originalValue: originalOrder.OrderHed_CustNum
+              });
             }
           }
         }
@@ -369,9 +390,20 @@ async function orderService(fastify, _) {
           try {
             const custNum = padCustNum(order.OrderHed_CustNum);
             if (custNum) {
-              const companySearch = await fastify.backoff(() =>
+              fastify.log.debug(`Searching for company with customer_custnum: ${custNum} for order ${orderNum}`);
+              let companySearch = await fastify.backoff(() =>
                 fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
+              
+              // If not found with padded value, try without leading zeros
+              if (!companySearch.results?.[0]?.id && custNum !== String(parseInt(custNum, 10))) {
+                const unpaddedNum = String(parseInt(custNum, 10));
+                fastify.log.debug(`No company found with padded custnum ${custNum}, trying unpadded: ${unpaddedNum}`);
+                companySearch = await fastify.backoff(() =>
+                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [unpaddedNum])
+                );
+              }
+              
               if (companySearch.results?.[0]?.id) {
                 await fastify.hubspotAdapter.createAssociation(
                   'deals',
@@ -382,7 +414,7 @@ async function orderService(fastify, _) {
                 );
                 fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
               } else {
-                fastify.log.warn(`No company found for customer_custnum: ${custNum} (order ${orderNum})`);
+                fastify.log.warn(`No company found for customer_custnum: ${custNum} (order ${orderNum}) - Original value: ${order.OrderHed_CustNum}`);
               }
             } else {
               fastify.log.warn(`Order ${orderNum} has no customer number for association`);
@@ -392,7 +424,8 @@ async function orderService(fastify, _) {
             fastify.log.error(`Failed to associate order ${orderNum} to company (custnum: ${custNum}):`, {
               error: associationError.message,
               status: associationError.response?.status,
-              statusText: associationError.response?.statusText
+              statusText: associationError.response?.statusText,
+              originalValue: order.OrderHed_CustNum
             });
           }
 

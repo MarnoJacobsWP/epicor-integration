@@ -15,7 +15,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },
   { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toValidProdGrup },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
-  { epicor: 'RowIdent', hubspot: 'rowident' },
+  { epicor: 'RowIdent', hubspot: 'rowident_' },
 ];
 
 function transformEpicorToHubSpot(epicorRecord) {
@@ -40,7 +40,7 @@ function chunkArray(array, size) {
 
 async function quoteProdMixService(fastify, _) {
   const BATCH_SIZE = fastify.constants.BATCH_SIZES.LINE_ITEMS || 100;
-  const UNIQUE_PROPERTY = 'rowident';
+  const UNIQUE_PROPERTY = 'rowident_';
 
   async function infoRecord(data) {
     return await fastify.lineItemRepository.findByIdProperty(data);

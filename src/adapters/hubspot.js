@@ -338,6 +338,8 @@ class HubspotAdapter {
     }
     
     try {
+      this.logger.debug(`Searching companies by ${propertyName}:`, values);
+      
       const CHUNK_SIZE = 10;
       const valueChunks = [];
       
@@ -356,6 +358,8 @@ class HubspotAdapter {
           }]
         }));
         
+        this.logger.debug(`Search request for ${propertyName}:`, { filterGroups });
+        
         const response = await this._makeRequest(
           'POST',
           '/crm/v3/objects/companies/search',
@@ -366,6 +370,11 @@ class HubspotAdapter {
           }
         );
         
+        this.logger.debug(`Search response: found ${response.data.results?.length || 0} companies for ${chunk}`);
+        if (response.data.results?.length > 0) {
+          this.logger.debug('Sample result:', response.data.results[0]);
+        }
+        
         if (response.data.results) {
           allResults.push(...response.data.results);
         }
@@ -374,6 +383,8 @@ class HubspotAdapter {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
+      
+      this.logger.debug(`Total companies found: ${allResults.length} for values:`, values);
       
       return { results: allResults };
       
