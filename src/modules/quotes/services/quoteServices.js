@@ -588,29 +588,19 @@ async function quoteService(fastify, _) {
       }
 
       const uniqueRecords = Array.from(quoteMap.values());
-      fastify.log.info(`Fetched ${records.length} quotes, deduplicated to ${uniqueRecords.length}, starting batch sync...`);
-      fastify.log.info(uniqueRecords)
+      fastify.log.info(`Fetched ${records.length} quotes, deduplicated to ${uniqueRecords.length}, starting individual sync...`);
 
-      const batches = chunkArray(uniqueRecords, BATCH_SIZE);
-      const batchResults = [];
+      const results = {
+        total: uniqueRecords.length,
+        created: 0,
+        updated: 0,
+        errors: 0,
+        skipped: 0
+      };
+
+      await processQuotesIndividually(uniqueRecords, results);
       
-      for (let i = 0; i < batches.length; i++) {
-        fastify.log.info(`Processing batch ${i + 1}/${batches.length} (${batches[i].length} quotes)...`);
-        const result = await processQuoteBatch(batches[i]);
-        batchResults.push(result);
-        
-        if (i < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-      
-      const totalResults = batchResults.reduce((acc, batch) => ({
-        total: acc.total + batch.total,
-        created: acc.created + batch.created,
-        updated: acc.updated + batch.updated,
-        errors: acc.errors + batch.errors,
-        skipped: acc.skipped + batch.skipped
-      }), { total: 0, created: 0, updated: 0, errors: 0, skipped: 0 });
+      const totalResults = results;
       
       fastify.log.info(`Quote sync complete: ${totalResults.created} created, ${totalResults.updated} updated, ${totalResults.errors} errors, ${totalResults.skipped} skipped`);
 
@@ -622,7 +612,6 @@ async function quoteService(fastify, _) {
         errorCount: totalResults.errors,
         skippedCount: totalResults.skipped,
         totalEpicorQuotes: records.length,
-        batchCount: batches.length,
         metadata
       };
     } catch (error) {
