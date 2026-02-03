@@ -242,8 +242,25 @@ async function orderService(fastify, _) {
 
       if (upsertResult.numErrors > 0) {
         results.errors += upsertResult.numErrors;
+        fastify.log.error(`Batch had ${upsertResult.numErrors} errors out of ${batchData.length} orders`);
+        
         if (upsertResult.errors) {
-          upsertResult.errors.forEach(error => {
+          upsertResult.errors.forEach((error, idx) => {
+            fastify.log.error(`Batch error ${idx + 1}:`, {
+              message: error.message,
+              category: error.category,
+              subCategory: error.subCategory,
+              context: error.context,
+              index: error.index
+            });
+            
+            if (error.index !== undefined && batchData[error.index]) {
+              fastify.log.error(`Failed order data at index ${error.index}:`, {
+                orderNum: batchData[error.index].id,
+                properties: batchData[error.index].properties
+              });
+            }
+            
             results.errorDetails.push({
               error: error.message,
               category: error.category

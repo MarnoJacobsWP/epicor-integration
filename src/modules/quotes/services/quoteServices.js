@@ -191,6 +191,35 @@ async function quoteService(fastify, _) {
         fastify.hubspotAdapter.batchUpsertDeals(batchData, UNIQUE_PROPERTY)
       );
 
+      if (upsertResult.numErrors > 0) {
+        results.errors += upsertResult.numErrors;
+        fastify.log.error(`Batch had ${upsertResult.numErrors} errors out of ${batchData.length} quotes`);
+        
+        if (upsertResult.errors) {
+          upsertResult.errors.forEach((error, idx) => {
+            fastify.log.error(`Batch error ${idx + 1}:`, {
+              message: error.message,
+              category: error.category,
+              subCategory: error.subCategory,
+              context: error.context,
+              index: error.index
+            });
+            
+            if (error.index !== undefined && batchData[error.index]) {
+              fastify.log.error(`Failed quote data at index ${error.index}:`, {
+                quoteNum: batchData[error.index].id,
+                properties: batchData[error.index].properties
+              });
+            }
+            
+            results.errorDetails.push({
+              error: error.message,
+              category: error.category
+            });
+          });
+        }
+      }
+
       if (upsertResult.status === 'COMPLETE' && upsertResult.results) {
         for (const result of upsertResult.results) {
           const quoteNum = result.properties?.[UNIQUE_PROPERTY];

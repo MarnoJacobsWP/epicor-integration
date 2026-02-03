@@ -135,10 +135,34 @@ class HubspotAdapter {
       }
       
     } catch (error) {
-      this.logger.error('HubSpot batchUpsertCompanies failed:', {
-        message: error.message,
-        stack: error.stack
-      });
+      if (error.response?.status === 400) {
+        const errorData = error.response.data;
+        this.logger.error('HubSpot Companies Batch Upsert Error:', {
+          message: errorData.message,
+          correlationId: errorData.correlationId,
+          category: errorData.category,
+          errors: errorData.errors,
+          context: errorData.context,
+          numInputs: batchData.length,
+          sampleInputs: batchData.slice(0, 3)
+        });
+        
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          errorData.errors.forEach((err, idx) => {
+            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
+              message: err.message,
+              subCategory: err.subCategory,
+              context: err.context,
+              links: err.links
+            });
+          });
+        }
+      } else {
+        this.logger.error('HubSpot batchUpsertCompanies failed:', {
+          message: error.message,
+          stack: error.stack
+        });
+      }
       throw error;
     }
   }
@@ -201,8 +225,23 @@ class HubspotAdapter {
         this.logger.error('HubSpot Contacts Batch Upsert Error:', {
           message: errorData.message,
           correlationId: errorData.correlationId,
-          errors: errorData.errors
+          category: errorData.category,
+          errors: errorData.errors,
+          context: errorData.context,
+          numInputs: batchData.length,
+          sampleInputs: batchData.slice(0, 3)
         });
+        
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          errorData.errors.forEach((err, idx) => {
+            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
+              message: err.message,
+              subCategory: err.subCategory,
+              context: err.context,
+              links: err.links
+            });
+          });
+        }
       }
       throw error;
     }
@@ -266,8 +305,23 @@ class HubspotAdapter {
         this.logger.error('HubSpot Deals Batch Upsert Error:', {
           message: errorData.message,
           correlationId: errorData.correlationId,
-          errors: errorData.errors
+          category: errorData.category,
+          errors: errorData.errors,
+          context: errorData.context,
+          numInputs: inputs.length,
+          sampleInputs: inputs.slice(0, 3)
         });
+        
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          errorData.errors.forEach((err, idx) => {
+            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
+              message: err.message,
+              subCategory: err.subCategory,
+              context: err.context,
+              links: err.links
+            });
+          });
+        }
       }
       throw error;
     }
@@ -331,8 +385,23 @@ class HubspotAdapter {
         this.logger.error('HubSpot Line Items Batch Upsert Error:', {
           message: errorData.message,
           correlationId: errorData.correlationId,
-          errors: errorData.errors
+          category: errorData.category,
+          errors: errorData.errors,
+          context: errorData.context,
+          numInputs: batchData.length,
+          sampleInputs: batchData.slice(0, 3)
         });
+        
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          errorData.errors.forEach((err, idx) => {
+            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
+              message: err.message,
+              subCategory: err.subCategory,
+              context: err.context,
+              links: err.links
+            });
+          });
+        }
       }
       throw error;
     }
