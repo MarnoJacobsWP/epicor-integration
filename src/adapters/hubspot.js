@@ -50,6 +50,10 @@ class HubspotAdapter {
     try {
       this.logger.info(`Batch upsert: ${batchData.length} companies, idProperty: ${idProperty}`);
       
+      if (batchData.length > 0) {
+        this.logger.debug('First batch item:', JSON.stringify(batchData[0], null, 2));
+      }
+      
       const inputs = batchData.map((item, index) => {
         if (!item.id) {
           throw new Error(`Item ${index}: Missing id field`);
@@ -67,7 +71,10 @@ class HubspotAdapter {
         const cleanedProperties = {};
         for (const [key, value] of Object.entries(item.properties)) {
           if (value !== null && value !== undefined && value !== '') {
-            cleanedProperties[key] = String(value).substring(0, 1000);
+            let cleanedValue = String(value);
+            cleanedValue = cleanedValue.replace(/\u0000/g, '');
+            cleanedValue = cleanedValue.replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '?');
+            cleanedProperties[key] = cleanedValue.substring(0, 1000);
           }
         }
         
@@ -78,35 +85,60 @@ class HubspotAdapter {
         };
       });
       
-      this.logger.debug('Batch upsert request payload:', { inputs: inputs.slice(0, 1) });
+      this.logger.debug('Batch upsert request payload sample:', { 
+        total: inputs.length,
+        firstInput: inputs[0],
+        lastInput: inputs[inputs.length - 1]
+      });
       
-      const response = await this._makeRequest(
-        'POST',
-        '/crm/v3/objects/companies/batch/upsert',
-        { inputs }
-      );
-      
-      const result = response.data;
-      
-      if (result.status === 'COMPLETE') {
-        const created = result.results?.filter(r => r.new)?.length || 0;
-        const updated = result.results?.filter(r => !r.new)?.length || 0;
-        this.logger.info(`Batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
-      } else {
-        this.logger.warn(`Batch status: ${result.status}`);
+      try {
+        const response = await this._makeRequest(
+          'POST',
+          '/crm/v3/objects/companies/batch/upsert',
+          { inputs }
+        );
+        
+        const result = response.data;
+        
+        if (result.status === 'COMPLETE') {
+          const created = result.results?.filter(r => r.new)?.length || 0;
+          const updated = result.results?.filter(r => !r.new)?.length || 0;
+          this.logger.info(`Batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
+        } else {
+          this.logger.warn(`Batch status: ${result.status}`);
+        }
+        
+        return result;
+        
+      } catch (requestError) {
+        if (requestError.response?.status === 400) {
+          const errorData = requestError.response.data;
+          this.logger.error('HubSpot Batch Upsert Error Details:', {
+            message: errorData.message,
+            correlationId: errorData.correlationId,
+            errors: errorData.errors,
+            status: errorData.status,
+            category: errorData.category
+          });
+          
+          if (errorData.errors && errorData.errors.length > 0) {
+            errorData.errors.forEach((err, idx) => {
+              this.logger.error(`Error ${idx + 1}:`, {
+                message: err.message,
+                context: err.context,
+                subCategory: err.subCategory
+              });
+            });
+          }
+        }
+        throw requestError;
       }
-      
-      return result;
       
     } catch (error) {
-      if (error.response?.status === 400) {
-        const errorData = error.response.data;
-        this.logger.error('HubSpot Batch Upsert Error:', {
-          message: errorData.message,
-          correlationId: errorData.correlationId,
-          errors: errorData.errors
-        });
-      }
+      this.logger.error('HubSpot batchUpsertCompanies failed:', {
+        message: error.message,
+        stack: error.stack
+      });
       throw error;
     }
   }

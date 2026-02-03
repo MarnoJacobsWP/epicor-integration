@@ -43,10 +43,29 @@ function transformEpicorToHubSpot(epicorCustomer) {
         }
       }
     } catch (error) {
-      // Log but don't fail
     }
   }
   return result;
+}
+
+function validateAndCleanCustomer(customer) {
+  const cleaned = { ...customer };
+  
+  if (cleaned.Customer_CustID) {
+    cleaned.Customer_CustID = String(cleaned.Customer_CustID)
+      .trim()
+      .replace(/[^a-zA-Z0-9-_]/g, '_')
+      .substring(0, 100);
+  }
+  
+  if (cleaned.Customer_Name) {
+    cleaned.Customer_Name = String(cleaned.Customer_Name)
+      .trim()
+      .replace(/[^\w\s-]/g, ' ')
+      .substring(0, 200);
+  }
+  
+  return cleaned;
 }
 
 function chunkArray(array, size) {
@@ -89,22 +108,38 @@ async function customerService(fastify, _) {
     };
 
     const batchData = [];
+    const failedCustomers = [];
     
     for (const customer of customers) {
       try {
-        const custId = customer.Customer_CustID || customer.Customer_CustNum;
+        const cleanedCustomer = validateAndCleanCustomer(customer);
+        const custId = cleanedCustomer.Customer_CustID || cleanedCustomer.Customer_CustNum;
+        
         if (!custId) {
           results.skipped++;
+          failedCustomers.push({
+            customer: customer.Customer_Name || 'Unknown',
+            reason: 'Missing Customer ID'
+          });
           continue;
         }
 
         const custIdStr = String(custId).trim();
         if (!custIdStr) {
           results.skipped++;
+          failedCustomers.push({
+            customer: customer.Customer_Name || 'Unknown',
+            reason: 'Empty Customer ID'
+          });
           continue;
         }
 
-        let properties = transformEpicorToHubSpot(customer);
+        let properties = transformEpicorToHubSpot(cleanedCustomer);
+        
+        if (!properties.name || properties.name.trim() === '') {
+          fastify.log.warn(`Customer ${custIdStr} has empty name, using ID as name`);
+          properties.name = `Customer ${custIdStr}`;
+        }
         
         if (!properties[UNIQUE_PROPERTY]) {
           properties[UNIQUE_PROPERTY] = custIdStr;
@@ -113,12 +148,20 @@ async function customerService(fastify, _) {
         const cleanProperties = {};
         for (const [key, value] of Object.entries(properties)) {
           if (value !== null && value !== undefined && value !== '') {
-            cleanProperties[key] = String(value).substring(0, 500);
+            const strValue = String(value);
+            if (strValue.includes('Facilitation')) {
+              fastify.log.info(`Processing customer with "Facilitation" in value: ${custIdStr}, property: ${key}`);
+            }
+            cleanProperties[key] = strValue.substring(0, 500);
           }
         }
         
         if (!cleanProperties[UNIQUE_PROPERTY] || !cleanProperties.name) {
           results.skipped++;
+          failedCustomers.push({
+            customer: customer.Customer_Name || custIdStr,
+            reason: `Missing required properties: UNIQUE=${!!cleanProperties[UNIQUE_PROPERTY]}, NAME=${!!cleanProperties.name}`
+          });
           continue;
         }
         
@@ -131,17 +174,37 @@ async function customerService(fastify, _) {
         results.errors++;
         results.errorDetails.push({
           error: error.message,
-          customer: customer.Customer_Name || 'Unknown'
+          customer: customer.Customer_Name || 'Unknown',
+          customerId: customer.Customer_CustID || customer.Customer_CustNum
+        });
+        failedCustomers.push({
+          customer: customer.Customer_Name || 'Unknown',
+          customerId: customer.Customer_CustID || customer.Customer_CustNum,
+          reason: error.message
         });
       }
     }
 
     if (batchData.length === 0) {
-      fastify.log.warn('No valid customer data for batch processing');
+      fastify.log.warn('No valid customer data for batch processing', {
+        failedCustomers: failedCustomers.slice(0, 5)
+      });
       return results;
     }
 
-    fastify.log.info(`Prepared ${batchData.length} companies for batch upsert`);
+    fastify.log.info(`Prepared ${batchData.length} companies for batch upsert, ${failedCustomers.length} failed validation`);
+
+    const facilitationCustomer = batchData.find(c => 
+      c.id === '0349' || 
+      c.properties.name?.includes('Facilitation')
+    );
+    
+    if (facilitationCustomer) {
+      fastify.log.info('DEBUG - Facilitation customer properties:', {
+        id: facilitationCustomer.id,
+        properties: facilitationCustomer.properties
+      });
+    }
 
     try {
       const upsertResult = await fastify.backoff(() =>
