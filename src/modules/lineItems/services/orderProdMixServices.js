@@ -155,19 +155,6 @@ async function orderProdMixService(fastify, _) {
             } else {
               await createDataBase(dbData);
             }
-
-            if (result.new && dealId) {
-              try {
-                await fastify.backoff(() =>
-                  fastify.hubspotAdapter._makeRequest('PUT', 
-                    `/crm/v4/objects/line_items/${result.id}/associations/deals/${dealId}/20`
-                  )
-                );
-                fastify.log.debug(`Associated line item ${result.id} to deal ${dealId}`);
-              } catch (error) {
-                fastify.log.error(`Failed to associate line item ${result.id} to deal ${dealId}:`, error.message);
-              }
-            }
           }
         }
       }

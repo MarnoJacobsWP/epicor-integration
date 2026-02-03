@@ -640,6 +640,27 @@ class HubspotAdapter {
       `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}/${associationTypeId}`
     );
   }
+
+  async getAssociationTypes(fromObjectType, toObjectType) {
+    try {
+      const response = await this._makeRequest(
+        'GET',
+        `/crm/v4/associations/${fromObjectType}/${toObjectType}/labels`
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.warn(`Failed to get association types for ${fromObjectType} to ${toObjectType}: ${error.message}`);
+      return null;
+    }
+  }
+
+  async createAssociationV3(fromObjectType, fromObjectId, toObjectType, toObjectId, associationCategory) {
+    // V3 API uses association categories instead of type IDs
+    return this._makeRequest(
+      'PUT',
+      `/crm/v3/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}/${associationCategory}`
+    );
+  }
 }
 
 async function hubspotAdapterPlugin(fastify, options) {
