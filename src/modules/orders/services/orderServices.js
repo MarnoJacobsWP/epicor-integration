@@ -16,28 +16,28 @@ const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_OrderNum', hubspot: 'orderhed_ordernum', transform: String },
   { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
   { epicor: 'OrderDtl_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
-  //{ epicor: 'OrderHed_OrderDate', hubspot: 'orderhed_orderdate', transform: toMidnightUTC },
-  //{ epicor: 'OrderHed_CheckBox10', hubspot: 'orderhed_checkboxan', transform: Boolean },
-  //{ epicor: 'Customer_Name', hubspot: 'customer_name' },
-  //{ epicor: 'OrderHed_Character08', hubspot: 'orderhed_characternh' },
-  //{ epicor: 'OrderHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
-  //{ epicor: 'SalesRep_Name', hubspot: 'salesrep_name' },
-  //{ epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' },
-  //{ epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' },
-  //{ epicor: 'OrderHed_ShortChar03', hubspot: 'orderhed_shortchar03' },
-  //{ epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' },
-  //{ epicor: 'OrderHed_UserChar3', hubspot: 'orderhed_userchar3' },
-  //{ epicor: 'OrderHed_Character01', hubspot: 'orderhed_character01' },
-  //{ epicor: 'OrderHed_ShortChar05', hubspot: 'orderhed_shortchar05' },
-  //{ epicor: 'OrderHed_ShortChar06', hubspot: 'orderhed_shortchar06' },
-  //{ epicor: 'OrderHed_ShortChar07', hubspot: 'orderhed_shortchar07' },
-  //{ epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' },
-  //{ epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' },
-  //{ epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' },
-  //{ epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' },
-  //{ epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' },
-  //{ epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
-  //{ epicor: 'RowIdent', hubspot: 'rowident' },
+  { epicor: 'OrderHed_OrderDate', hubspot: 'orderhed_orderdate', transform: toMidnightUTC },
+  { epicor: 'OrderHed_CheckBox10', hubspot: 'orderhed_checkboxan', transform: Boolean },
+  { epicor: 'Customer_Name', hubspot: 'customer_name' },
+  { epicor: 'OrderHed_Character08', hubspot: 'orderhed_characternh' },
+  { epicor: 'OrderHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name' },
+  { epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' },
+  { epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' },
+  { epicor: 'OrderHed_ShortChar03', hubspot: 'orderhed_shortchar03' },
+  { epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' },
+  { epicor: 'OrderHed_UserChar3', hubspot: 'orderhed_userchar3' },
+  { epicor: 'OrderHed_Character01', hubspot: 'orderhed_character01' },
+  { epicor: 'OrderHed_ShortChar05', hubspot: 'orderhed_shortchar05' },
+  { epicor: 'OrderHed_ShortChar06', hubspot: 'orderhed_shortchar06' },
+  { epicor: 'OrderHed_ShortChar07', hubspot: 'orderhed_shortchar07' },
+  { epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' },
+  { epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' },
+  { epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' },
+  { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' },
+  { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' },
+  { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
+  { epicor: 'RowIdent', hubspot: 'rowident' },
 ];
 
 function transformEpicorToHubSpot(epicorOrder) {
@@ -276,6 +276,7 @@ async function orderService(fastify, _) {
     
     for (const order of orders) {
       const orderNum = order.OrderHed_OrderNum;
+      let props = {};
 
       try {
         const query = {
@@ -296,7 +297,7 @@ async function orderService(fastify, _) {
           }
         }
 
-        const props = transformEpicorToHubSpot(order);
+        props = transformEpicorToHubSpot(order);
         props.dealname = generateDealName(order);
         props.pipeline = HUBSPOT_PIPELINES.QUOTES;
         props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;

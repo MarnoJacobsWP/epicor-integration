@@ -352,6 +352,7 @@ async function quoteService(fastify, _) {
     
     for (const quote of quotes) {
       const quoteNum = quote.QuoteHed_QuoteNum;
+      let props = {};
 
       try {
         const query = {
@@ -372,7 +373,7 @@ async function quoteService(fastify, _) {
           }
         }
 
-        const props = transformEpicorToHubSpot(quote);
+        props = transformEpicorToHubSpot(quote);
         props.dealname = generateDealName(quote);
         const isWon = props.task_conclusion === 'WIN';
         
