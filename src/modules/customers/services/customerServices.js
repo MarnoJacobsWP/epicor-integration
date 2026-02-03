@@ -17,18 +17,18 @@ const toValidSalesRep = (salesRepName) => {
 
 const FIELD_MAPPINGS = [
   { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: (v) => v ? String(v).trim() : null },
-  { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: (v) => v ? String(v).trim() : null },
-  { epicor: 'Customer_Name', hubspot: 'name', transform: (v) => v ? String(v).trim().substring(0, 200) : null },
-  { epicor: 'Customer_Address1', hubspot: 'address', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
-  { epicor: 'Customer_Address2', hubspot: 'address2', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
-  { epicor: 'Customer_Address3', hubspot: 'customer_addressc', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
-  { epicor: 'Customer_City', hubspot: 'city', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
-  { epicor: 'Customer_State', hubspot: 'hs_state_code', transform: (v) => v ? String(v).trim().substring(0, 50) : null },
-  { epicor: 'Customer_Zip', hubspot: 'zip', transform: (v) => v ? String(v).trim().substring(0, 20) : null },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toValidSalesRep },
-  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: toValidSalesRep },
-  { epicor: 'CustGrup_GroupDesc', hubspot: 'custgrup_groupdesc', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
-  { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
+  //{ epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: (v) => v ? String(v).trim() : null },
+  //{ epicor: 'Customer_Name', hubspot: 'name', transform: (v) => v ? String(v).trim().substring(0, 200) : null },
+  //{ epicor: 'Customer_Address1', hubspot: 'address', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
+  //{ epicor: 'Customer_Address2', hubspot: 'address2', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
+  //{ epicor: 'Customer_Address3', hubspot: 'customer_addressc', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
+  //{ epicor: 'Customer_City', hubspot: 'city', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
+  //{ epicor: 'Customer_State', hubspot: 'hs_state_code', transform: (v) => v ? String(v).trim().substring(0, 50) : null },
+  //{ epicor: 'Customer_Zip', hubspot: 'zip', transform: (v) => v ? String(v).trim().substring(0, 20) : null },
+  //{ epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toValidSalesRep },
+  //{ epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: toValidSalesRep },
+  //{ epicor: 'CustGrup_GroupDesc', hubspot: 'custgrup_groupdesc', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
+  //{ epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
 ];
 
 function transformEpicorToHubSpot(epicorCustomer) {
