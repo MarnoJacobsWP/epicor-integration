@@ -136,27 +136,8 @@ class HubspotAdapter {
       
     } catch (error) {
       if (error.response?.status === 400) {
-        const errorData = error.response.data;
-        this.logger.error('HubSpot Companies Batch Upsert Error:', {
-          message: errorData.message,
-          correlationId: errorData.correlationId,
-          category: errorData.category,
-          errors: errorData.errors,
-          context: errorData.context,
-          numInputs: batchData.length,
-          sampleInputs: batchData.slice(0, 3)
-        });
-        
-        if (errorData.errors && Array.isArray(errorData.errors)) {
-          errorData.errors.forEach((err, idx) => {
-            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
-              message: err.message,
-              subCategory: err.subCategory,
-              context: err.context,
-              links: err.links
-            });
-          });
-        }
+        this.logger.error('HubSpot Companies Batch Upsert - Full Error Response:', error.response.data);
+        this.logger.error('HubSpot Companies Batch Upsert - Sample Inputs:', batchData.slice(0, 2));
       } else {
         this.logger.error('HubSpot batchUpsertCompanies failed:', {
           message: error.message,
@@ -221,27 +202,8 @@ class HubspotAdapter {
       
     } catch (error) {
       if (error.response?.status === 400) {
-        const errorData = error.response.data;
-        this.logger.error('HubSpot Contacts Batch Upsert Error:', {
-          message: errorData.message,
-          correlationId: errorData.correlationId,
-          category: errorData.category,
-          errors: errorData.errors,
-          context: errorData.context,
-          numInputs: batchData.length,
-          sampleInputs: batchData.slice(0, 3)
-        });
-        
-        if (errorData.errors && Array.isArray(errorData.errors)) {
-          errorData.errors.forEach((err, idx) => {
-            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
-              message: err.message,
-              subCategory: err.subCategory,
-              context: err.context,
-              links: err.links
-            });
-          });
-        }
+        this.logger.error('HubSpot Contacts Batch Upsert - Full Error Response:', error.response.data);
+        this.logger.error('HubSpot Contacts Batch Upsert - Sample Inputs:', batchData.slice(0, 2));
       }
       throw error;
     }
@@ -302,27 +264,8 @@ class HubspotAdapter {
       
     } catch (error) {
       if (error.response?.status === 400) {
-        const errorData = error.response.data;
-        this.logger.error('HubSpot Deals Batch Upsert Error:', {
-          message: errorData.message,
-          correlationId: errorData.correlationId,
-          category: errorData.category,
-          errors: errorData.errors,
-          context: errorData.context,
-          numInputs: inputs.length,
-          sampleInputs: inputs.slice(0, 3)
-        });
-        
-        if (errorData.errors && Array.isArray(errorData.errors)) {
-          errorData.errors.forEach((err, idx) => {
-            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
-              message: err.message,
-              subCategory: err.subCategory,
-              context: err.context,
-              links: err.links
-            });
-          });
-        }
+        this.logger.error('HubSpot Deals Batch Upsert - Full Error Response:', error.response.data);
+        this.logger.error('HubSpot Deals Batch Upsert - Sample Inputs:', inputs?.slice(0, 2));
       }
       throw error;
     }
@@ -382,27 +325,8 @@ class HubspotAdapter {
       
     } catch (error) {
       if (error.response?.status === 400) {
-        const errorData = error.response.data;
-        this.logger.error('HubSpot Line Items Batch Upsert Error:', {
-          message: errorData.message,
-          correlationId: errorData.correlationId,
-          category: errorData.category,
-          errors: errorData.errors,
-          context: errorData.context,
-          numInputs: batchData.length,
-          sampleInputs: batchData.slice(0, 3)
-        });
-        
-        if (errorData.errors && Array.isArray(errorData.errors)) {
-          errorData.errors.forEach((err, idx) => {
-            this.logger.error(`HubSpot Batch Error ${idx + 1}:`, {
-              message: err.message,
-              subCategory: err.subCategory,
-              context: err.context,
-              links: err.links
-            });
-          });
-        }
+        this.logger.error('HubSpot Line Items Batch Upsert - Full Error Response:', error.response.data);
+        this.logger.error('HubSpot Line Items Batch Upsert - Sample Inputs:', batchData.slice(0, 2));
       }
       throw error;
     }
