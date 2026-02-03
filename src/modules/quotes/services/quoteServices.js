@@ -28,6 +28,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum', transform: String },
   { epicor: 'QuoteHed_CustNum', hubspot: 'quotehed_custnum', transform: padCustNum },
   { epicor: 'Customer_Name', hubspot: 'customer_name' },
+  { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },
   //{ epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },
   //{ epicor: 'QuoteHed_CurrentStage', hubspot: 'quotehed_currentstage' },
   //{ epicor: 'QuoteHed_Character08', hubspot: 'quotehed_character08' },
@@ -49,7 +50,6 @@ const FIELD_MAPPINGS = [
   //{ epicor: 'QuoteHed_Character02', hubspot: 'quotehed_character02' },
   //{ epicor: 'QuoteHed_Character03', hubspot: 'quotehed_character03' },
   //{ epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
-  //{ epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },
   //{ epicor: 'Task_TaskComment', hubspot: 'task_taskcomment' },
   //{ epicor: 'RowIdent', hubspot: 'rowident' },
 ];
