@@ -1,5 +1,11 @@
 import fp from 'fastify-plugin';
 
+const padCustNum = (value) => {
+  if (!value) return null;
+  const str = String(value).trim();
+  return str.padStart(4, '0');
+};
+
 const toMidnightUTC = (v) => {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
@@ -10,7 +16,7 @@ const UNIQUE_PROPERTY = 'orderhed_ordernum';
 
 const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_OrderNum', hubspot: 'orderhed_ordernum', transform: String },
-  { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: String },
+  { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
   { epicor: 'OrderDtl_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
   { epicor: 'OrderHed_OrderDate', hubspot: 'orderhed_orderdate', transform: toMidnightUTC },
   { epicor: 'OrderHed_CheckBox10', hubspot: 'orderhed_checkboxan', transform: Boolean },
@@ -137,6 +143,17 @@ async function orderService(fastify, _) {
         
       } catch (error) {
         results.errors++;
+        fastify.log.error(`Order batch processing error for order ${order.OrderHed_OrderNum}:`, {
+          error: error.message,
+          stack: error.stack,
+          orderNum: order.OrderHed_OrderNum,
+          orderData: {
+            OrderHed_OrderNum: order.OrderHed_OrderNum,
+            OrderHed_CustNum: order.OrderHed_CustNum,
+            Customer_Name: order.Customer_Name,
+            OrderHed_Character08: order.OrderHed_Character08
+          }
+        });
         results.errorDetails.push({
           error: error.message,
           order: order.OrderHed_OrderNum || 'Unknown'
@@ -192,6 +209,33 @@ async function orderService(fastify, _) {
             } else {
               await createDataBase(dbData);
             }
+
+            try {
+              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, result.id);
+            } catch (lineItemError) {
+              fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
+            }
+
+            try {
+              const custNum = padCustNum(originalOrder.OrderHed_CustNum);
+              if (custNum) {
+                const companySearch = await fastify.backoff(() =>
+                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+                );
+                if (companySearch.results?.[0]?.id) {
+                  await fastify.hubspotAdapter.createAssociation(
+                    'deals',
+                    result.id,
+                    'companies',
+                    companySearch.results[0].id,
+                    6
+                  );
+                  fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
+                }
+              }
+            } catch (associationError) {
+              fastify.log.warn(`Failed to associate order ${orderNum} to company: ${associationError.message}`);
+            }
           }
         }
       }
@@ -211,8 +255,13 @@ async function orderService(fastify, _) {
       fastify.log.info(`Batch processed: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
 
     } catch (error) {
-      fastify.log.error(`Batch upsert failed: ${error.message}`, {
-        response: error.response?.data
+      fastify.log.error(`Order batch upsert failed: ${error.message}`, {
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        errors: error.response?.data?.errors,
+        batchSize: batchData.length,
+        sampleOrder: batchData[0]
       });
       
       results.errors = batchData.length;
@@ -296,6 +345,33 @@ async function orderService(fastify, _) {
             });
           }
 
+          try {
+            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
+          } catch (lineItemError) {
+            fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            const custNum = padCustNum(order.OrderHed_CustNum);
+            if (custNum) {
+              const companySearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+              );
+              if (companySearch.results?.[0]?.id) {
+                await fastify.hubspotAdapter.createAssociation(
+                  'deals',
+                  dealId,
+                  'companies',
+                  companySearch.results[0].id,
+                  6
+                );
+                fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate order ${orderNum} to company: ${associationError.message}`);
+          }
+
           results.updated++;
         } else {
           const created = await fastify.backoff(() =>
@@ -314,11 +390,49 @@ async function orderService(fastify, _) {
             timestamp: new Date()
           });
 
+          try {
+            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
+          } catch (lineItemError) {
+            fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            const custNum = padCustNum(order.OrderHed_CustNum);
+            if (custNum) {
+              const companySearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+              );
+              if (companySearch.results?.[0]?.id) {
+                await fastify.hubspotAdapter.createAssociation(
+                  'deals',
+                  dealId,
+                  'companies',
+                  companySearch.results[0].id,
+                  6
+                );
+                fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate order ${orderNum} to company: ${associationError.message}`);
+          }
+
           results.created++;
         }
 
       } catch (error) {
-        fastify.log.error(`Order ${orderNum} failed: ${error.message}`);
+        fastify.log.error(`Individual order ${orderNum} failed:`, {
+          error: error.message,
+          stack: error.stack,
+          orderNum: orderNum,
+          orderData: {
+            OrderHed_OrderNum: order.OrderHed_OrderNum,
+            OrderHed_CustNum: order.OrderHed_CustNum,
+            Customer_Name: order.Customer_Name,
+            dealname: generateDealName(order)
+          },
+          properties: props
+        });
         results.errors++;
       }
     }
@@ -346,7 +460,7 @@ async function orderService(fastify, _) {
 
       const uniqueRecords = Array.from(orderMap.values());
       fastify.log.info(`Fetched ${records.length} orders, deduplicated to ${uniqueRecords.length}, starting batch sync...`);
-      fastify.log.info(uniqueRecords)
+
       const batches = chunkArray(uniqueRecords, BATCH_SIZE);
       const batchResults = [];
       
@@ -406,6 +520,7 @@ export default fp(orderService, {
   name: 'orderServices',
   dependencies: [
     'orderRepository',
+    'orderProdMixService',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

@@ -1,5 +1,11 @@
 import fp from 'fastify-plugin';
 
+const padCustNum = (value) => {
+  if (!value) return null;
+  const str = String(value).trim();
+  return str.padStart(4, '0');
+};
+
 const toMidnightUTC = (v) => {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
@@ -20,7 +26,7 @@ const toValidSalesRep = (v) => {
 
 const FIELD_MAPPINGS = [
   { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum', transform: Number },
-  { epicor: 'QuoteHed_CustNum', hubspot: 'quotehed_custnum', transform: Number },
+  { epicor: 'QuoteHed_CustNum', hubspot: 'quotehed_custnum', transform: padCustNum },
   { epicor: 'Customer_Name', hubspot: 'customer_name' },
   { epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },
   { epicor: 'QuoteHed_CurrentStage', hubspot: 'quotehed_currentstage' },
@@ -155,6 +161,17 @@ async function quoteService(fastify, _) {
         
       } catch (error) {
         results.errors++;
+        fastify.log.error(`Quote batch processing error for quote ${quote.QuoteHed_QuoteNum}:`, {
+          error: error.message,
+          stack: error.stack,
+          quoteNum: quote.QuoteHed_QuoteNum,
+          quoteData: {
+            QuoteHed_QuoteNum: quote.QuoteHed_QuoteNum,
+            QuoteHed_CustNum: quote.QuoteHed_CustNum,
+            Customer_Name: quote.Customer_Name,
+            QuoteHed_Character08: quote.QuoteHed_Character08
+          }
+        });
         results.errorDetails.push({
           error: error.message,
           quote: quote.QuoteHed_QuoteNum || 'Unknown'
@@ -210,6 +227,57 @@ async function quoteService(fastify, _) {
             } else {
               await createDataBase(dbData);
             }
+
+            try {
+              const quoteProdMixRecords = await fastify.epicorAdapter.fetchRelatedRecords(
+                ENDPOINTS.QUOTE_PROD_MIX,
+                'QuoteDtl_QuoteNum',
+                quoteNum
+              );
+              if (quoteProdMixRecords.records?.length) {
+                await fastify.quoteProdMixService.syncLineItemsForQuoteWithData(
+                  quoteNum,
+                  result.id,
+                  quoteProdMixRecords.records
+                );
+              }
+
+              const qSeatEtabRecords = await fastify.epicorAdapter.fetchRelatedRecords(
+                ENDPOINTS.QSEAT_ETAB,
+                'QuoteDtl_QuoteNum',
+                quoteNum
+              );
+              if (qSeatEtabRecords.records?.length) {
+                await fastify.qSeatEtabService.syncLineItemsForQuoteWithData(
+                  quoteNum,
+                  result.id,
+                  qSeatEtabRecords.records
+                );
+              }
+            } catch (lineItemError) {
+              fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
+            }
+
+            try {
+              const custNum = padCustNum(originalQuote.QuoteHed_CustNum);
+              if (custNum) {
+                const companySearch = await fastify.backoff(() =>
+                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+                );
+                if (companySearch.results?.[0]?.id) {
+                  await fastify.hubspotAdapter.createAssociation(
+                    'deals',
+                    result.id,
+                    'companies',
+                    companySearch.results[0].id,
+                    6
+                  );
+                  fastify.log.info(`Associated quote ${quoteNum} to company ${companySearch.results[0].id}`);
+                }
+              }
+            } catch (associationError) {
+              fastify.log.warn(`Failed to associate quote ${quoteNum} to company: ${associationError.message}`);
+            }
           }
         }
       }
@@ -228,8 +296,13 @@ async function quoteService(fastify, _) {
       fastify.log.info(`Batch processed: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
 
     } catch (error) {
-      fastify.log.error(`Batch upsert failed: ${error.message}`, {
-        response: error.response?.data
+      fastify.log.error(`Quote batch upsert failed: ${error.message}`, {
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        errors: error.response?.data?.errors,
+        batchSize: batchData.length,
+        sampleQuote: batchData[0]
       });
       
       results.errors = batchData.length;
@@ -324,6 +397,57 @@ async function quoteService(fastify, _) {
             });
           }
 
+          try {
+            const quoteProdMixRecords = await fastify.epicorAdapter.fetchRelatedRecords(
+              ENDPOINTS.QUOTE_PROD_MIX,
+              'QuoteDtl_QuoteNum',
+              quoteNum
+            );
+            if (quoteProdMixRecords.records?.length) {
+              await fastify.quoteProdMixService.syncLineItemsForQuoteWithData(
+                quoteNum,
+                dealId,
+                quoteProdMixRecords.records
+              );
+            }
+
+            const qSeatEtabRecords = await fastify.epicorAdapter.fetchRelatedRecords(
+              ENDPOINTS.QSEAT_ETAB,
+              'QuoteDtl_QuoteNum',
+              quoteNum
+            );
+            if (qSeatEtabRecords.records?.length) {
+              await fastify.qSeatEtabService.syncLineItemsForQuoteWithData(
+                quoteNum,
+                dealId,
+                qSeatEtabRecords.records
+              );
+            }
+          } catch (lineItemError) {
+            fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            const custNum = padCustNum(quote.QuoteHed_CustNum);
+            if (custNum) {
+              const companySearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+              );
+              if (companySearch.results?.[0]?.id) {
+                await fastify.hubspotAdapter.createAssociation(
+                  'deals',
+                  dealId,
+                  'companies',
+                  companySearch.results[0].id,
+                  6
+                );
+                fastify.log.info(`Associated quote ${quoteNum} to company ${companySearch.results[0].id}`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate quote ${quoteNum} to company: ${associationError.message}`);
+          }
+
           results.updated++;
         } else {
           const created = await fastify.backoff(() =>
@@ -342,11 +466,73 @@ async function quoteService(fastify, _) {
             timestamp: new Date()
           });
 
+          try {
+            const quoteProdMixRecords = await fastify.epicorAdapter.fetchRelatedRecords(
+              ENDPOINTS.QUOTE_PROD_MIX,
+              'QuoteDtl_QuoteNum',
+              quoteNum
+            );
+            if (quoteProdMixRecords.records?.length) {
+              await fastify.quoteProdMixService.syncLineItemsForQuoteWithData(
+                quoteNum,
+                dealId,
+                quoteProdMixRecords.records
+              );
+            }
+
+            const qSeatEtabRecords = await fastify.epicorAdapter.fetchRelatedRecords(
+              ENDPOINTS.QSEAT_ETAB,
+              'QuoteDtl_QuoteNum',
+              quoteNum
+            );
+            if (qSeatEtabRecords.records?.length) {
+              await fastify.qSeatEtabService.syncLineItemsForQuoteWithData(
+                quoteNum,
+                dealId,
+                qSeatEtabRecords.records
+              );
+            }
+          } catch (lineItemError) {
+            fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            const custNum = padCustNum(quote.QuoteHed_CustNum);
+            if (custNum) {
+              const companySearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+              );
+              if (companySearch.results?.[0]?.id) {
+                await fastify.hubspotAdapter.createAssociation(
+                  'deals',
+                  dealId,
+                  'companies',
+                  companySearch.results[0].id,
+                  6
+                );
+                fastify.log.info(`Associated quote ${quoteNum} to company ${companySearch.results[0].id}`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate quote ${quoteNum} to company: ${associationError.message}`);
+          }
+
           results.created++;
         }
 
       } catch (error) {
-        fastify.log.error(`Quote ${quoteNum} failed: ${error.message}`);
+        fastify.log.error(`Individual quote ${quoteNum} failed:`, {
+          error: error.message,
+          stack: error.stack,
+          quoteNum: quoteNum,
+          quoteData: {
+            QuoteHed_QuoteNum: quote.QuoteHed_QuoteNum,
+            QuoteHed_CustNum: quote.QuoteHed_CustNum,
+            Customer_Name: quote.Customer_Name,
+            dealname: generateDealName(quote)
+          },
+          properties: props
+        });
         results.errors++;
       }
     }
@@ -435,6 +621,8 @@ export default fp(quoteService, {
   name: 'quoteServices',
   dependencies: [
     'quoteRepository',
+    'quoteProdMixService',
+    'qSeatEtabService',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

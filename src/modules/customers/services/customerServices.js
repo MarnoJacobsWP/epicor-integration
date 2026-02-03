@@ -1,5 +1,11 @@
 import fp from 'fastify-plugin';
 
+const padCustNum = (value) => {
+  if (!value) return null;
+  const str = String(value).trim();
+  return str.padStart(4, '0');
+};
+
 const VALID_SALESREP_OPTIONS = [
   'CYA', 'House', 'Murphy Associates', 'Mike Kilcoyne and Associates', 
   'Reagan Penny', 'Phillips Contract Group, LLC', 'Dan Martin', 'Ginger Grant',
@@ -16,7 +22,7 @@ const toValidSalesRep = (salesRepName) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: (v) => v ? String(v).trim() : null },
+  { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
   { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: (v) => v ? String(v).trim() : null },
   { epicor: 'Customer_Name', hubspot: 'name', transform: (v) => v ? String(v).trim().substring(0, 200) : null },
   { epicor: 'Customer_Address1', hubspot: 'address', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
