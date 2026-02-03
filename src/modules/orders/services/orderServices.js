@@ -12,8 +12,6 @@ const toMidnightUTC = (v) => {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 };
 
-const UNIQUE_PROPERTY = 'orderhed_ordernum';
-
 const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_OrderNum', hubspot: 'orderhed_ordernum', transform: String },
   { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
