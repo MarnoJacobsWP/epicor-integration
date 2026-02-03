@@ -271,7 +271,7 @@ class HubspotAdapter {
     }
   }
 
-  async batchUpsertLineItems(batchData, idProperty = 'rowident') {
+  async batchUpsertLineItems(batchData, idProperty = 'rowident_') {
     try {
       this.logger.info(`Batch upsert: ${batchData.length} line items, idProperty: ${idProperty}`);
       
