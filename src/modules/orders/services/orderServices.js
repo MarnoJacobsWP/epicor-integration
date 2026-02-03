@@ -345,16 +345,6 @@ async function orderService(fastify, _) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
 
-          try {
-            const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : 'unknown';
-            fastify.log.error(`Failed to associate order ${orderNum} to company (custnum: ${custNum}):`, {
-              error: associationError.message,
-              status: associationError.response?.status,
-              statusText: associationError.response?.statusText,
-              originalValue: order.OrderHed_CustNum
-            });
-          }
-
           results.updated++;
         } else {
           const created = await fastify.backoff(() =>
@@ -377,20 +367,6 @@ async function orderService(fastify, _) {
             await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
-          }
-
-          try {
-              }
-            } else {
-              fastify.log.warn(`Order ${orderNum} has no customer number for association`);
-            }
-          } catch (associationError) {
-            const custNum = padCustNum(order.OrderHed_CustNum) || 'unknown';
-            fastify.log.error(`Failed to associate order ${orderNum} to company (custnum: ${custNum}):`, {
-              error: associationError.message,
-              status: associationError.response?.status,
-              statusText: associationError.response?.statusText
-            });
           }
 
           results.created++;
