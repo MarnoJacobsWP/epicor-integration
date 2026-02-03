@@ -284,14 +284,15 @@ async function orderService(fastify, _) {
           fastify.log.info(`Order ${orderNum} ${action} in HubSpot ${dealId}`);
 
           if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action });
+            await updateDataBase(query, { action, timestamp: new Date() });
           } else {
             await createDataBase({
               hubspotId: dealId,
               epicorId: order.RowIdent,
               source: 'EpicorOrders',
               orderNum: orderNum,
-              action: 'create'
+              action: 'create',
+              timestamp: new Date()
             });
           }
 
@@ -309,7 +310,8 @@ async function orderService(fastify, _) {
             epicorId: order.RowIdent,
             source: 'EpicorOrders',
             orderNum: orderNum,
-            action: 'create'
+            action: 'create',
+            timestamp: new Date()
           });
 
           results.created++;

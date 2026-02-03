@@ -34,15 +34,12 @@ const FIELD_MAPPINGS = [
 function transformEpicorToHubSpot(epicorCustomer) {
   const result = {};
   for (const { epicor, hubspot, transform } of FIELD_MAPPINGS) {
-    try {
-      const value = epicorCustomer[epicor];
-      if (value != null && value !== '') {
-        const transformed = transform ? transform(value) : value;
-        if (transformed != null && transformed !== '') {
-          result[hubspot] = transformed;
-        }
+    const value = epicorCustomer[epicor];
+    if (value != null && value !== '') {
+      const transformed = transform ? transform(value) : value;
+      if (transformed != null && transformed !== '') {
+        result[hubspot] = transformed;
       }
-    } catch (error) {
     }
   }
   return result;
@@ -148,11 +145,7 @@ async function customerService(fastify, _) {
         const cleanProperties = {};
         for (const [key, value] of Object.entries(properties)) {
           if (value !== null && value !== undefined && value !== '') {
-            const strValue = String(value);
-            if (strValue.includes('Facilitation')) {
-              fastify.log.info(`Processing customer with "Facilitation" in value: ${custIdStr}, property: ${key}`);
-            }
-            cleanProperties[key] = strValue.substring(0, 500);
+            cleanProperties[key] = String(value).substring(0, 500);
           }
         }
         
@@ -193,18 +186,6 @@ async function customerService(fastify, _) {
     }
 
     fastify.log.info(`Prepared ${batchData.length} companies for batch upsert, ${failedCustomers.length} failed validation`);
-
-    const facilitationCustomer = batchData.find(c => 
-      c.id === '0349' || 
-      c.properties.name?.includes('Facilitation')
-    );
-    
-    if (facilitationCustomer) {
-      fastify.log.info('DEBUG - Facilitation customer properties:', {
-        id: facilitationCustomer.id,
-        properties: facilitationCustomer.properties
-      });
-    }
 
     try {
       const upsertResult = await fastify.backoff(() =>
@@ -417,7 +398,6 @@ async function customerService(fastify, _) {
 
       const uniqueRecords = Array.from(customerMap.values());
       fastify.log.info(`Fetched ${records.length} customers, deduplicated to ${uniqueRecords.length}`);
-      fastify.log.info(uniqueRecords)
 
       const batches = chunkArray(uniqueRecords, BATCH_SIZE);
       const batchResults = [];
@@ -441,7 +421,6 @@ async function customerService(fastify, _) {
       }), { total: 0, created: 0, updated: 0, errors: 0, skipped: 0 });
 
       fastify.log.info(`Customer sync complete: ${totalResults.created} created, ${totalResults.updated} updated, ${totalResults.errors} errors`);
-      fastify.log.info(totalResults)
       return {
         success: true,
         syncedCount: uniqueRecords.length,

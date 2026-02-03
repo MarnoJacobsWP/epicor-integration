@@ -312,14 +312,15 @@ async function quoteService(fastify, _) {
           fastify.log.info(`Quote ${quoteNum} ${action} in HubSpot ${dealId}`);
 
           if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action });
+            await updateDataBase(query, { action, timestamp: new Date() });
           } else {
             await createDataBase({
               hubspotId: dealId,
               epicorId: quote.RowIdent,
               source: 'EpicorQuotes',
               quoteNum: quoteNum,
-              action: 'create'
+              action: 'create',
+              timestamp: new Date()
             });
           }
 
@@ -337,7 +338,8 @@ async function quoteService(fastify, _) {
             epicorId: quote.RowIdent,
             source: 'EpicorQuotes',
             quoteNum: quoteNum,
-            action: 'create'
+            action: 'create',
+            timestamp: new Date()
           });
 
           results.created++;
