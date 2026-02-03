@@ -383,10 +383,19 @@ async function orderService(fastify, _) {
                   6
                 );
                 fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
+              } else {
+                fastify.log.warn(`No company found for customer_custnum: ${custNum} (order ${orderNum})`);
               }
+            } else {
+              fastify.log.warn(`Order ${orderNum} has no customer number for association`);
             }
           } catch (associationError) {
-            fastify.log.warn(`Failed to associate order ${orderNum} to company: ${associationError.message}`);
+            const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : 'unknown';
+            fastify.log.error(`Failed to associate order ${orderNum} to company (custnum: ${custNum}):`, {
+              error: associationError.message,
+              status: associationError.response?.status,
+              statusText: associationError.response?.statusText
+            });
           }
 
           results.updated++;
@@ -428,10 +437,19 @@ async function orderService(fastify, _) {
                   6
                 );
                 fastify.log.info(`Associated order ${orderNum} to company ${companySearch.results[0].id}`);
+              } else {
+                fastify.log.warn(`No company found for customer_custnum: ${custNum} (order ${orderNum})`);
               }
+            } else {
+              fastify.log.warn(`Order ${orderNum} has no customer number for association`);
             }
           } catch (associationError) {
-            fastify.log.warn(`Failed to associate order ${orderNum} to company: ${associationError.message}`);
+            const custNum = padCustNum(order.OrderHed_CustNum) || 'unknown';
+            fastify.log.error(`Failed to associate order ${orderNum} to company (custnum: ${custNum}):`, {
+              error: associationError.message,
+              status: associationError.response?.status,
+              statusText: associationError.response?.statusText
+            });
           }
 
           results.created++;

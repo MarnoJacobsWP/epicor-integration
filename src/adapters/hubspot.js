@@ -248,10 +248,11 @@ class HubspotAdapter {
   }
 
   async batchUpsertDeals(batchData, idProperty = 'orderhed_ordernum') {
+    let inputs;
     try {
       this.logger.info(`Batch upsert: ${batchData.length} deals, idProperty: ${idProperty}`);
       
-      const inputs = batchData.map((item, index) => {
+      inputs = batchData.map((item, index) => {
         if (!item.id) {
           throw new Error(`Item ${index}: Missing id field`);
         }
