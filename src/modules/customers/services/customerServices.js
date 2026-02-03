@@ -417,6 +417,7 @@ async function customerService(fastify, _) {
 
       const uniqueRecords = Array.from(customerMap.values());
       fastify.log.info(`Fetched ${records.length} customers, deduplicated to ${uniqueRecords.length}`);
+      fastify.log.info(uniqueRecords)
 
       const batches = chunkArray(uniqueRecords, BATCH_SIZE);
       const batchResults = [];
@@ -440,7 +441,7 @@ async function customerService(fastify, _) {
       }), { total: 0, created: 0, updated: 0, errors: 0, skipped: 0 });
 
       fastify.log.info(`Customer sync complete: ${totalResults.created} created, ${totalResults.updated} updated, ${totalResults.errors} errors`);
-
+      fastify.log.info(totalResults)
       return {
         success: true,
         syncedCount: uniqueRecords.length,
