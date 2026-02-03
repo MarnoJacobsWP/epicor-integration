@@ -346,6 +346,40 @@ async function orderService(fastify, _) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
 
+          // Check if this order has a matching quote and update it to Closed Won
+          const quoteNum = order.OrderDtl_QuoteNum;
+          if (quoteNum) {
+            try {
+              const quoteSearchData = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum', [quoteNum])
+              );
+              
+              if (quoteSearchData.results?.[0]?.id) {
+                const quoteDealId = quoteSearchData.results[0].id;
+                await fastify.backoff(() =>
+                  fastify.hubspotAdapter.updateDeal({
+                    dealId: quoteDealId,
+                    properties: {
+                      pipeline: HUBSPOT_PIPELINES.QUOTES,
+                      dealstage: HUBSPOT_DEAL_STAGES.CLOSED_WON
+                    }
+                  })
+                );
+                fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won (deal ${quoteDealId})`);
+                
+                // Update quote's line items with order line items
+                try {
+                  await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId);
+                  fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data`);
+                } catch (quoteLineItemError) {
+                  fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
+                }
+              }
+            } catch (quoteUpdateError) {
+              fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
+            }
+          }
+
           results.updated++;
         } else {
           const created = await fastify.backoff(() =>
@@ -368,6 +402,40 @@ async function orderService(fastify, _) {
             await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
+          }
+
+          // Check if this order has a matching quote and update it to Closed Won
+          const quoteNum = order.OrderDtl_QuoteNum;
+          if (quoteNum) {
+            try {
+              const quoteSearchData = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum', [quoteNum])
+              );
+              
+              if (quoteSearchData.results?.[0]?.id) {
+                const quoteDealId = quoteSearchData.results[0].id;
+                await fastify.backoff(() =>
+                  fastify.hubspotAdapter.updateDeal({
+                    dealId: quoteDealId,
+                    properties: {
+                      pipeline: HUBSPOT_PIPELINES.QUOTES,
+                      dealstage: HUBSPOT_DEAL_STAGES.CLOSED_WON
+                    }
+                  })
+                );
+                fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won (deal ${quoteDealId})`);
+                
+                // Update quote's line items with order line items
+                try {
+                  await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId);
+                  fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data`);
+                } catch (quoteLineItemError) {
+                  fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
+                }
+              }
+            } catch (quoteUpdateError) {
+              fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
+            }
           }
 
           results.created++;

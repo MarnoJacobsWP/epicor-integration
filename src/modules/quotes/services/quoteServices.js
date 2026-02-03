@@ -428,54 +428,9 @@ async function quoteService(fastify, _) {
           }
 
           try {
-            const quoteProdMixRecords = await fastify.epicorAdapter.fetchRelatedRecords(
-              ENDPOINTS.QUOTE_PROD_MIX,
-              'QuoteDtl_QuoteNum',
-              quoteNum
-            );
-            if (quoteProdMixRecords.records?.length) {
-              await fastify.quoteProdMixService.syncLineItemsForQuoteWithData(
-                quoteNum,
-                dealId,
-                quoteProdMixRecords.records
-              );
-            }
-
-            const qSeatEtabRecords = await fastify.epicorAdapter.fetchRelatedRecords(
-              ENDPOINTS.QSEAT_ETAB,
-              'QuoteDtl_QuoteNum',
-              quoteNum
-            );
-            if (qSeatEtabRecords.records?.length) {
-              await fastify.qSeatEtabService.syncLineItemsForQuoteWithData(
-                quoteNum,
-                dealId,
-                qSeatEtabRecords.records
-              );
-            }
+            await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
-          }
-
-          try {
-            const custNum = padCustNum(quote.QuoteHed_CustNum);
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
-                  'deals',
-                  dealId,
-                  'companies',
-                  companySearch.results[0].id,
-                  6
-                );
-                fastify.log.info(`Associated quote ${quoteNum} to company ${companySearch.results[0].id}`);
-              }
-            }
-          } catch (associationError) {
-            fastify.log.warn(`Failed to associate quote ${quoteNum} to company: ${associationError.message}`);
           }
 
           results.updated++;
@@ -497,54 +452,9 @@ async function quoteService(fastify, _) {
           });
 
           try {
-            const quoteProdMixRecords = await fastify.epicorAdapter.fetchRelatedRecords(
-              ENDPOINTS.QUOTE_PROD_MIX,
-              'QuoteDtl_QuoteNum',
-              quoteNum
-            );
-            if (quoteProdMixRecords.records?.length) {
-              await fastify.quoteProdMixService.syncLineItemsForQuoteWithData(
-                quoteNum,
-                dealId,
-                quoteProdMixRecords.records
-              );
-            }
-
-            const qSeatEtabRecords = await fastify.epicorAdapter.fetchRelatedRecords(
-              ENDPOINTS.QSEAT_ETAB,
-              'QuoteDtl_QuoteNum',
-              quoteNum
-            );
-            if (qSeatEtabRecords.records?.length) {
-              await fastify.qSeatEtabService.syncLineItemsForQuoteWithData(
-                quoteNum,
-                dealId,
-                qSeatEtabRecords.records
-              );
-            }
+            await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
-          }
-
-          try {
-            const custNum = padCustNum(quote.QuoteHed_CustNum);
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
-                  'deals',
-                  dealId,
-                  'companies',
-                  companySearch.results[0].id,
-                  6
-                );
-                fastify.log.info(`Associated quote ${quoteNum} to company ${companySearch.results[0].id}`);
-              }
-            }
-          } catch (associationError) {
-            fastify.log.warn(`Failed to associate quote ${quoteNum} to company: ${associationError.message}`);
           }
 
           results.created++;
