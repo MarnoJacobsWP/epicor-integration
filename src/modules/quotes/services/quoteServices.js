@@ -374,6 +374,7 @@ async function quoteService(fastify, _) {
 
       const uniqueRecords = Array.from(quoteMap.values());
       fastify.log.info(`Fetched ${records.length} quotes, deduplicated to ${uniqueRecords.length}, starting batch sync...`);
+      fastify.log.info(uniqueRecords)
 
       const batches = chunkArray(uniqueRecords, BATCH_SIZE);
       const batchResults = [];

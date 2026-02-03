@@ -346,7 +346,7 @@ async function orderService(fastify, _) {
 
       const uniqueRecords = Array.from(orderMap.values());
       fastify.log.info(`Fetched ${records.length} orders, deduplicated to ${uniqueRecords.length}, starting batch sync...`);
-
+      fastify.log.info(uniqueRecords)
       const batches = chunkArray(uniqueRecords, BATCH_SIZE);
       const batchResults = [];
       
