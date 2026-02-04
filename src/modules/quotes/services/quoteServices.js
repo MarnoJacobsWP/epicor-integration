@@ -461,7 +461,7 @@ async function quoteService(fastify, _) {
         }
 
       } catch (error) {
-        fastify.log.error(`Individual quote ${quoteNum} failed: ${error.message} ${error.stack} ${quoteNum} ${error.response?.status} ${error.response?.statusText} ${error.response?.data} ${error.response?.data?.message} ${error.response?.data?.category} ${error.response?.data?.errors} ${error.response?.data?.validationResults} ${quoteData} ${props}`)
+        fastify.log.error(`Individual quote ${quoteNum} failed: ${error.message} ${error.stack} ${quoteNum} ${error.response?.status} ${error.response?.statusText} ${error.response?.data} ${error.response?.data?.message} ${error.response?.data?.category} ${error.response?.data?.errors} ${error.response?.data?.validationResults} ${props}`)
         results.errors++;
       }
     }
