@@ -32,15 +32,20 @@ class HubspotAdapter {
       const response = await this.client(config);
       return response;
     } catch (error) {
+      let requestData = null;
+      if (data) {
+        requestData = Array.isArray(data.inputs)
+          ? { inputs: data.inputs.slice(0, 2), total: data.inputs.length }
+          : data;
+      }
+      
       this.logger.error(`HubSpot API request failed: ${error.message}`, {
         url: config.url,
         method: config.method,
         status: error.response?.status,
         statusText: error.response?.statusText,
         data: error.response?.data,
-        requestData: data ? (Array.isArray(data.inputs) ? 
-          { inputs: data.inputs.slice(0, 2), total: data.inputs.length } : 
-          data) : null
+        requestData
       });
       throw error;
     }
@@ -49,10 +54,6 @@ class HubspotAdapter {
   async batchUpsertCompanies(batchData, idProperty = 'customer_custid_') {
     try {
       this.logger.info(`Batch upsert: ${batchData.length} companies, idProperty: ${idProperty}`);
-      
-      if (batchData.length > 0) {
-        this.logger.debug('First batch item:', JSON.stringify(batchData[0], null, 2));
-      }
       
       const inputs = batchData.map((item, index) => {
         if (!item.id) {
@@ -72,8 +73,8 @@ class HubspotAdapter {
         for (const [key, value] of Object.entries(item.properties)) {
           if (value !== null && value !== undefined && value !== '') {
             let cleanedValue = String(value);
-            cleanedValue = cleanedValue.replace(/\u0000/g, '');
-            cleanedValue = cleanedValue.replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '?');
+            cleanedValue = cleanedValue.replaceAll('\u0000', '');
+            cleanedValue = cleanedValue.replaceAll(/[^\x20-\x7E\u00A0-\u00FF]/g, '?');
             cleanedProperties[key] = cleanedValue.substring(0, 1000);
           }
         }
@@ -83,12 +84,6 @@ class HubspotAdapter {
           properties: cleanedProperties,
           idProperty: idProperty
         };
-      });
-      
-      this.logger.debug('Batch upsert request payload sample:', { 
-        total: inputs.length,
-        firstInput: inputs[0],
-        lastInput: inputs[inputs.length - 1]
       });
       
       try {
@@ -180,8 +175,6 @@ class HubspotAdapter {
         };
       });
       
-      this.logger.debug('Contacts batch upsert request payload:', { inputs: inputs.slice(0, 1) });
-      
       const response = await this._makeRequest(
         'POST',
         '/crm/v3/objects/contacts/batch/upsert',
@@ -242,8 +235,6 @@ class HubspotAdapter {
         };
       });
       
-      this.logger.debug('Deals batch upsert request payload:', { inputs: inputs.slice(0, 1) });
-      
       const response = await this._makeRequest(
         'POST',
         '/crm/v3/objects/deals/batch/upsert',
@@ -303,8 +294,6 @@ class HubspotAdapter {
         };
       });
       
-      this.logger.debug('Line items batch upsert request payload:', { inputs: inputs.slice(0, 1) });
-      
       const response = await this._makeRequest(
         'POST',
         '/crm/v3/objects/line_items/batch/upsert',
@@ -338,8 +327,6 @@ class HubspotAdapter {
     }
     
     try {
-      this.logger.debug(`Searching companies by ${propertyName}:`, values);
-      
       const CHUNK_SIZE = 10;
       const valueChunks = [];
       
@@ -358,8 +345,6 @@ class HubspotAdapter {
           }]
         }));
         
-        this.logger.debug(`Search request for ${propertyName}:`, { filterGroups });
-        
         const response = await this._makeRequest(
           'POST',
           '/crm/v3/objects/companies/search',
@@ -370,11 +355,6 @@ class HubspotAdapter {
           }
         );
         
-        this.logger.debug(`Search response: found ${response.data.results?.length || 0} companies for ${chunk}`);
-        if (response.data.results?.length > 0) {
-          this.logger.debug('Sample result:', response.data.results[0]);
-        }
-        
         if (response.data.results) {
           allResults.push(...response.data.results);
         }
@@ -383,8 +363,6 @@ class HubspotAdapter {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
-      
-      this.logger.debug(`Total companies found: ${allResults.length} for values:`, values);
       
       return { results: allResults };
       

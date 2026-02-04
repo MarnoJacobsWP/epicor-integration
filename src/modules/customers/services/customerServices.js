@@ -6,19 +6,19 @@ const padCustNum = (value) => {
   return str.padStart(4, '0');
 };
 
-const VALID_SALESREP_OPTIONS = [
+const VALID_SALESREP_OPTIONS = new Set([
   'CYA', 'House', 'Murphy Associates', 'Mike Kilcoyne and Associates', 
   'Reagan Penny', 'Phillips Contract Group, LLC', 'Dan Martin', 'Ginger Grant',
   'Bruce Longhino Group', 'Mike Fabionar', 'Morgan Associates', 
   'Heather Huddleston Interiors', 'Lauren East', 'Kevin Klieforth',
   'Jennifer Gates', 'Bobbie Zimmer', 'Elizabeth Gerber', 
   'Stephenson Toelkes Associates', 'John Parrish', 'Madison Mcsherry', 'Barry Holley', 'Unknown Option'
-];
+]);
 
 const toValidSalesRep = (salesRepName) => {
-  if (!salesRepName || !salesRepName.trim()) return 'Unknown Option';
+  if (!salesRepName?.trim()) return 'Unknown Option';
   const cleanName = salesRepName.trim();
-  return VALID_SALESREP_OPTIONS.includes(cleanName) ? cleanName : 'Unknown Option';
+  return VALID_SALESREP_OPTIONS.has(cleanName) ? cleanName : 'Unknown Option';
 };
 
 const FIELD_MAPPINGS = [
