@@ -214,6 +214,29 @@ async function customerService(fastify, _) {
               } else {
                 await createDataBase(dbData);
               }
+
+              try {
+                const custNum = originalCustomer.Customer_CustNum ? padCustNum(originalCustomer.Customer_CustNum) : null;
+                if (custNum) {
+                  const contactSearch = await fastify.backoff(() =>
+                    fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
+                  );
+                  if (contactSearch.results?.length > 0) {
+                    for (const contact of contactSearch.results) {
+                      await fastify.hubspotAdapter.createAssociation(
+                        'companies',
+                        result.id,
+                        'contacts',
+                        contact.id,
+                        2
+                      );
+                    }
+                    fastify.log.info(`Associated company ${result.id} with ${contactSearch.results.length} contact(s)`);
+                  }
+                }
+              } catch (associationError) {
+                fastify.log.warn(`Failed to associate contacts for company ${result.id}: ${associationError.message}`);
+              }
             }
           }
         }
@@ -328,6 +351,29 @@ async function customerService(fastify, _) {
             });
           }
 
+          try {
+            const custNum = customer.Customer_CustNum ? padCustNum(customer.Customer_CustNum) : null;
+            if (custNum) {
+              const contactSearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
+              );
+              if (contactSearch.results?.length > 0) {
+                for (const contact of contactSearch.results) {
+                  await fastify.hubspotAdapter.createAssociation(
+                    'companies',
+                    companyId,
+                    'contacts',
+                    contact.id,
+                    2
+                  );
+                }
+                fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate contacts for company ${companyId}: ${associationError.message}`);
+          }
+
           results.updated++;
         } else {
           const created = await fastify.backoff(() =>
@@ -342,6 +388,29 @@ async function customerService(fastify, _) {
             customerId: custId,
             action: 'create'
           });
+
+          try {
+            const custNum = customer.Customer_CustNum ? padCustNum(customer.Customer_CustNum) : null;
+            if (custNum) {
+              const contactSearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
+              );
+              if (contactSearch.results?.length > 0) {
+                for (const contact of contactSearch.results) {
+                  await fastify.hubspotAdapter.createAssociation(
+                    'companies',
+                    companyId,
+                    'contacts',
+                    contact.id,
+                    2
+                  );
+                }
+                fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate contacts for company ${companyId}: ${associationError.message}`);
+          }
 
           results.created++;
         }

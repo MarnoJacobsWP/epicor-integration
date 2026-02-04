@@ -165,18 +165,18 @@ async function contactService(fastify, _) {
             }
 
             try {
-              const custNum = originalContact.CustCnt_CustNum;
+              const custNum = originalContact.CustCnt_CustNum ? padCustNum(originalContact.CustCnt_CustNum) : null;
               if (custNum) {
                 const companySearch = await fastify.backoff(() =>
-                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [String(custNum)])
+                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
                 );
                 if (companySearch.results?.[0]?.id) {
                   await fastify.hubspotAdapter.createAssociation(
-                    'contacts',
-                    result.id,
                     'companies',
                     companySearch.results[0].id,
-                    1
+                    'contacts',
+                    result.id,
+                    2
                   );
                   fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
                 }
@@ -292,18 +292,18 @@ async function contactService(fastify, _) {
           }
 
           try {
-            const custNum = contact.CustCnt_CustNum;
+            const custNum = contact.CustCnt_CustNum ? padCustNum(contact.CustCnt_CustNum) : null;
             if (custNum) {
               const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [String(custNum)])
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
               if (companySearch.results?.[0]?.id) {
                 await fastify.hubspotAdapter.createAssociation(
-                  'contacts',
-                  contactId,
                   'companies',
                   companySearch.results[0].id,
-                  1
+                  'contacts',
+                  contactId,
+                  2
                 );
                 fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
               }
@@ -329,18 +329,18 @@ async function contactService(fastify, _) {
           });
 
           try {
-            const custNum = contact.CustCnt_CustNum;
+            const custNum = contact.CustCnt_CustNum ? padCustNum(contact.CustCnt_CustNum) : null;
             if (custNum) {
               const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [String(custNum)])
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
               if (companySearch.results?.[0]?.id) {
                 await fastify.hubspotAdapter.createAssociation(
-                  'contacts',
-                  contactId,
                   'companies',
                   companySearch.results[0].id,
-                  1
+                  'contacts',
+                  contactId,
+                  2
                 );
                 fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
               }
