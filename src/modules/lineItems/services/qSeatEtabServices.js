@@ -352,38 +352,28 @@ async function qSeatEtabService(fastify, _) {
     }
     
     const uniqueRecords = Array.from(lineItemMap.values());
-    fastify.log.info(`Found ${uniqueRecords.length} unique QSeatEtab line items for quote ${quoteNum}`);
+    fastify.log.info(`Found ${uniqueRecords.length} unique QSeatEtab line items for quote ${quoteNum}, processing individually...`);
 
-    const batches = chunkArray(uniqueRecords, BATCH_SIZE);
-    const batchResults = [];
+    const results = {
+      total: uniqueRecords.length,
+      created: 0,
+      updated: 0,
+      errors: 0,
+      skipped: 0,
+      errorDetails: []
+    };
+
+    await processLineItemsIndividually(uniqueRecords, dealId, results);
     
-    for (let i = 0; i < batches.length; i++) {
-      fastify.log.info(`Processing QSeatEtab batch ${i + 1}/${batches.length} (${batches[i].length} line items)...`);
-      const result = await processLineItemBatch(batches[i], dealId);
-      batchResults.push(result);
-      
-      if (i < batches.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
-    
-    const totalResults = batchResults.reduce((acc, batch) => ({
-      total: acc.total + batch.total,
-      created: acc.created + batch.created,
-      updated: acc.updated + batch.updated,
-      errors: acc.errors + batch.errors,
-      skipped: acc.skipped + batch.skipped
-    }), { total: 0, created: 0, updated: 0, errors: 0, skipped: 0 });
-    
-    fastify.log.info(`QSeatEtab sync for quote ${quoteNum} complete: ${totalResults.created} created, ${totalResults.updated} updated, ${totalResults.errors} errors, ${totalResults.skipped} skipped`);
+    fastify.log.info(`QSeatEtab sync for quote ${quoteNum} complete: ${results.created} created, ${results.updated} updated, ${results.errors} errors, ${results.skipped} skipped`);
 
     return {
       success: true,
       lineItemCount: uniqueRecords.length,
-      createdCount: totalResults.created,
-      updatedCount: totalResults.updated,
-      errorCount: totalResults.errors,
-      skippedCount: totalResults.skipped
+      createdCount: results.created,
+      updatedCount: results.updated,
+      errorCount: results.errors,
+      skippedCount: results.skipped
     };
   }
 
