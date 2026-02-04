@@ -203,7 +203,7 @@ async function quoteService(fastify, _) {
                   companySearch.results[0].id,
                   'deals',
                   dealId,
-                  341
+                  5
                 );
                 fastify.log.info(`Associated quote deal ${dealId} with company ${companySearch.results[0].id}`);
               }
@@ -254,7 +254,7 @@ async function quoteService(fastify, _) {
                   companySearch.results[0].id,
                   'deals',
                   dealId,
-                  341
+                  5
                 );
                 fastify.log.info(`Associated quote deal ${dealId} with company ${companySearch.results[0].id}`);
               }
