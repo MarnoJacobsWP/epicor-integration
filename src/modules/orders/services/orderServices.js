@@ -185,12 +185,12 @@ async function orderService(fastify, _) {
               );
               fastify.log.info(`Order ${orderNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
-                fastify.log.info(`Order ${orderNum} UPDATE - Attempting to associate company ${companySearch.results[0].id} with deal ${dealId} using type 5`);
+                fastify.log.info(`Order ${orderNum} UPDATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
                 const associationResult = await fastify.hubspotAdapter.createAssociation(
-                  'companies',
-                  companySearch.results[0].id,
                   'deals',
                   dealId,
+                  'companies',
+                  companySearch.results[0].id,
                   5
                 );
                 fastify.log.info(`Order ${orderNum} UPDATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
@@ -248,12 +248,12 @@ async function orderService(fastify, _) {
               );
               fastify.log.info(`Order ${orderNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
-                fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate company ${companySearch.results[0].id} with deal ${dealId} using type 5`);
+                fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
                 const associationResult = await fastify.hubspotAdapter.createAssociation(
-                  'companies',
-                  companySearch.results[0].id,
                   'deals',
                   dealId,
+                  'companies',
+                  companySearch.results[0].id,
                   5
                 );
                 fastify.log.info(`Order ${orderNum} CREATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
