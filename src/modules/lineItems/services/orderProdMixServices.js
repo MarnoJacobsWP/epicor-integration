@@ -256,7 +256,7 @@ async function orderProdMixService(fastify, _) {
 
           try {
             await fastify.backoff(() =>
-              fastify.hubspotAdapter.updateLineItem(lineItemId, cleanProps)
+              fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
             );
           } catch (error) {
             if (error?.response?.data?.message?.toLowerCase() === 'resource not found') {
@@ -302,7 +302,7 @@ async function orderProdMixService(fastify, _) {
           }] : [];
 
           const created = await fastify.backoff(() =>
-            fastify.hubspotAdapter.createLineItem(cleanProps, associations)
+            fastify.hubspotAdapter.createLineItem({ properties: cleanProps, associations })
           );
           const lineItemId = created.id;
 
