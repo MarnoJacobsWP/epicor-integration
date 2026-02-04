@@ -176,6 +176,27 @@ async function orderService(fastify, _) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
 
+          try {
+            const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
+            if (custNum) {
+              const companySearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+              );
+              if (companySearch.results?.[0]?.id) {
+                await fastify.hubspotAdapter.createAssociation(
+                  'companies',
+                  companySearch.results[0].id,
+                  'deals',
+                  dealId,
+                  2
+                );
+                fastify.log.info(`Associated order deal ${dealId} with company ${companySearch.results[0].id}`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate company for order ${orderNum}: ${associationError.message}`);
+          }
+
           // Check if this order has a matching quote and update it to Closed Won
           const quoteNum = order.OrderDtl_QuoteNum;
           if (quoteNum) {
@@ -209,6 +230,27 @@ async function orderService(fastify, _) {
             await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
+            if (custNum) {
+              const companySearch = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+              );
+              if (companySearch.results?.[0]?.id) {
+                await fastify.hubspotAdapter.createAssociation(
+                  'companies',
+                  companySearch.results[0].id,
+                  'deals',
+                  dealId,
+                  2
+                );
+                fastify.log.info(`Associated order deal ${dealId} with company ${companySearch.results[0].id}`);
+              }
+            }
+          } catch (associationError) {
+            fastify.log.warn(`Failed to associate company for order ${orderNum}: ${associationError.message}`);
           }
 
           // Check if this order has a matching quote and update it to Closed Won
