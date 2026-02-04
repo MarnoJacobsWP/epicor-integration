@@ -216,7 +216,7 @@ async function quoteService(fastify, _) {
               fastify.log.warn(`Quote ${quoteNum} UPDATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
+            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: ${associationError.message} ${associationError.response?.data} ${associationError}`);
           }
 
           results.updated++;

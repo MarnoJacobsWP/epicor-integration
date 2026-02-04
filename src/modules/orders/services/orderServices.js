@@ -201,7 +201,7 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Order ${orderNum} UPDATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
+            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: ${associationError.message} ${associationError.response?.data} ${associationError}`);
           }
 
           // Check if this order has a matching quote and update it to Closed Won
