@@ -377,6 +377,22 @@ async function qSeatEtabService(fastify, _) {
     };
   }
 
+  async function syncLineItemsForQuote(quoteNum, dealId) {
+    fastify.log.info(`Fetching QSeatEtab line items for quote ${quoteNum}...`);
+    const { records } = await fastify.epicorAdapter.fetchRelatedRecords(
+      fastify.constants.ENDPOINTS.QSEAT_ETAB,
+      'QuoteDtl_QuoteNum',
+      quoteNum
+    );
+    
+    if (!records?.length) {
+      fastify.log.info(`No QSeatEtab line items found for quote ${quoteNum}`);
+      return { success: true, message: 'No QSeatEtab line items for this quote', lineItemCount: 0 };
+    }
+
+    return await syncLineItemsForQuoteWithData(quoteNum, dealId, records);
+  }
+
   async function task(dateString) {
     try {
       fastify.log.info('Processing Tasks for QSeatEtab Line Items');
