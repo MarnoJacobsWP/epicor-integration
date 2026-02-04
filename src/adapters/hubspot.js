@@ -469,14 +469,22 @@ class HubspotAdapter {
           }]
         }));
         
+        const requestBody = {
+          filterGroups,
+          properties: [propertyName, 'dealname', 'dealstage', 'pipeline', 'id'],
+          limit: chunk.length
+        };
+        
+        this.logger.info('Searching deals by property:', {
+          propertyName,
+          values: chunk,
+          requestBody: JSON.stringify(requestBody, null, 2)
+        });
+        
         const response = await this._makeRequest(
           'POST',
           '/crm/v3/objects/deals/search',
-          {
-            filterGroups,
-            properties: [propertyName, 'dealname', 'dealstage', 'pipeline', 'id'],
-            limit: chunk.length
-          }
+          requestBody
         );
         
         if (response.data.results) {

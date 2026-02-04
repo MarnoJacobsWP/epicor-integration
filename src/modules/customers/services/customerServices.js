@@ -51,26 +51,6 @@ function transformEpicorToHubSpot(epicorCustomer) {
   return result;
 }
 
-function validateAndCleanCustomer(customer) {
-  const cleaned = { ...customer };
-  
-  if (cleaned.Customer_CustID) {
-    cleaned.Customer_CustID = String(cleaned.Customer_CustID)
-      .trim()
-      .replace(/[^a-zA-Z0-9-_]/g, '_')
-      .substring(0, 100);
-  }
-  
-  if (cleaned.Customer_Name) {
-    cleaned.Customer_Name = String(cleaned.Customer_Name)
-      .trim()
-      .replace(/[^\w\s-]/g, ' ')
-      .substring(0, 200);
-  }
-  
-  return cleaned;
-}
-
 function chunkArray(array, size) {
   const chunks = [];
   for (let i = 0; i < array.length; i += size) {

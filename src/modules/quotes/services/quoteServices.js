@@ -12,16 +12,15 @@ const toMidnightUTC = (v) => {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 };
 
-const VALID_SALESREP_NAMES = [
-  'House', 'Mike Kilcoyne and Associates', 'Phillips Contract Group, LLC', 'CYA',
-  'Reagan Penny', 'Dan Martin', 'Murphy Associates', 'Bruce Longhino Group',
-  'Morgan Associates', 'Mike Fabionar', 'Ginger Grant', 'Lauren East',
-  'Elizabeth Gerber', 'Jennifer Gates', 'John Parrish', 'Unknown Option'
-];
-
 const toValidSalesRep = (v) => {
   if (!v) return 'Unknown Option';
-  return VALID_SALESREP_NAMES.includes(v) ? v : 'Unknown Option';
+  const validOptions = [
+    'House', 'Mike Kilcoyne and Associates', 'Phillips Contract Group, LLC', 'CYA',
+    'Reagan Penny', 'Dan Martin', 'Murphy Associates', 'Bruce Longhino Group',
+    'Morgan Associates', 'Mike Fabionar', 'Ginger Grant', 'Lauren East',
+    'Elizabeth Gerber', 'Jennifer Gates', 'John Parrish', 'Unknown Option'
+  ];
+  return validOptions.includes(v) ? v : 'Unknown Option';
 };
 
 const FIELD_MAPPINGS = [
@@ -72,18 +71,8 @@ function generateDealName(epicorQuote) {
   return `${jobName} - ${customerName}`;
 }
 
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
 async function quoteService(fastify, _) {
-  const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, BATCH_SIZES } = fastify.constants;
-  const BATCH_SIZE = BATCH_SIZES.QUOTES || 100;
-  const UNIQUE_PROPERTY = 'quotehed_quotenum';
+  const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES } = fastify.constants;
 
   async function infoRecord(data) {
     return await fastify.quoteRepository.findByIdProperty(data);
@@ -101,7 +90,7 @@ async function quoteService(fastify, _) {
     return await fastify.quoteRepository.deleteDatabase(filter);
   }
 
-  async function processQuoteBatch(quotes) {
+  async function processQuotesIndividually(quotes, results) {
     const results = {
       total: quotes.length,
       created: 0,
@@ -365,10 +354,19 @@ async function quoteService(fastify, _) {
         if (!existRecord) {
           try {
             const searchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum', [quoteNum])
+              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
             );
             existRecord = searchData.results?.[0] || null;
+            fastify.log.info(`Search completed for quote ${quoteNum}: ${existRecord ? 'Found existing deal ' + existRecord.id : 'No existing deal found'}`);
           } catch (searchError) {
+            fastify.log.error({
+              quoteNum,
+              searchErrorMessage: searchError.message,
+              status: searchError.response?.status,
+              statusText: searchError.response?.statusText,
+              hubspotError: JSON.stringify(searchError.response?.data),
+              validationResults: JSON.stringify(searchError.response?.data?.validationResults)
+            }, `Search failed for quote ${quoteNum}`);
             existRecord = null;
           }
         }
@@ -461,7 +459,17 @@ async function quoteService(fastify, _) {
         }
 
       } catch (error) {
-        fastify.log.error(`Individual quote ${quoteNum} failed: ${error.message} ${error.stack} ${quoteNum} ${error.response?.status} ${error.response?.statusText} ${error.response?.data} ${error.response?.data?.message} ${error.response?.data?.category} ${error.response?.data?.errors} ${error.response?.data?.validationResults} ${props}`)
+        fastify.log.error({
+          quoteNum,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          hubspotError: JSON.stringify(error.response?.data),
+          hubspotMessage: error.response?.data?.message,
+          category: error.response?.data?.category,
+          validationResults: JSON.stringify(error.response?.data?.validationResults),
+          errors: JSON.stringify(error.response?.data?.errors),
+          stack: error.stack
+        }, `Individual quote ${quoteNum} failed: ${error.message}`);
         results.errors++;
       }
     }
@@ -489,7 +497,7 @@ async function quoteService(fastify, _) {
 
       const uniqueRecords = Array.from(quoteMap.values());
       fastify.log.info(`Fetched ${records.length} quotes, deduplicated to ${uniqueRecords.length}, starting individual sync...`);
-      fastify.log.info(uniqueRecords)
+      
       const results = {
         total: uniqueRecords.length,
         created: 0,
