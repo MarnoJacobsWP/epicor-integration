@@ -249,9 +249,9 @@ async function quoteProdMixService(fastify, _) {
             const searchData = await fastify.backoff(() =>
               fastify.hubspotAdapter.searchLineItems({
                 body: {
-                  filterGroups: [{ filters: [{ propertyName: 'rowident', operator: 'EQ', value: String(rowident) }] }],
+                  filterGroups: [{ filters: [{ propertyName: 'rowident_', operator: 'EQ', value: String(rowident) }] }],
                   limit: 1,
-                  properties: ['rowident', 'name', 'price'],
+                  properties: ['rowident_', 'name', 'price'],
                 },
               })
             );

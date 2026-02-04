@@ -188,7 +188,7 @@ async function orderService(fastify, _) {
                   companySearch.results[0].id,
                   'deals',
                   dealId,
-                  2
+                  341
                 );
                 fastify.log.info(`Associated order deal ${dealId} with company ${companySearch.results[0].id}`);
               }
@@ -244,7 +244,7 @@ async function orderService(fastify, _) {
                   companySearch.results[0].id,
                   'deals',
                   dealId,
-                  2
+                  341
                 );
                 fastify.log.info(`Associated order deal ${dealId} with company ${companySearch.results[0].id}`);
               }

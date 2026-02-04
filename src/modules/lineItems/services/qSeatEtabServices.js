@@ -248,9 +248,9 @@ async function qSeatEtabService(fastify, _) {
             const searchData = await fastify.backoff(() =>
               fastify.hubspotAdapter.searchLineItems({
                 body: {
-                  filterGroups: [{ filters: [{ propertyName: 'rowident', operator: 'EQ', value: String(rowident) }] }],
+                  filterGroups: [{ filters: [{ propertyName: 'rowident_', operator: 'EQ', value: String(rowident) }] }],
                   limit: 1,
-                  properties: ['rowident', 'name', 'hs_sku', 'description', 'quantity'],
+                  properties: ['rowident_', 'name', 'price'],
                 },
               })
             );
