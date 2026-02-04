@@ -314,7 +314,7 @@ async function quoteService(fastify, _) {
 
       const uniqueRecords = Array.from(quoteMap.values());
       fastify.log.info(`Fetched ${records.length} quotes, deduplicated to ${uniqueRecords.length}, starting individual sync...`);
-      fastify.log(uniqueRecords)
+      fastify.log.info(uniqueRecords)
       
       const results = {
         total: uniqueRecords.length,
