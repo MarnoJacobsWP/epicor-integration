@@ -178,23 +178,30 @@ async function orderService(fastify, _) {
 
           try {
             const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
+            fastify.log.info(`Order ${orderNum} UPDATE - Raw CustNum: ${order.OrderHed_CustNum}, Padded: ${custNum}`);
             if (custNum) {
               const companySearch = await fastify.backoff(() =>
                 fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
+              fastify.log.info(`Order ${orderNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
+                fastify.log.info(`Order ${orderNum} UPDATE - Attempting to associate company ${companySearch.results[0].id} with deal ${dealId} using type 5`);
+                const associationResult = await fastify.hubspotAdapter.createAssociation(
                   'companies',
                   companySearch.results[0].id,
                   'deals',
                   dealId,
                   5
                 );
-                fastify.log.info(`Associated order deal ${dealId} with company ${companySearch.results[0].id}`);
+                fastify.log.info(`Order ${orderNum} UPDATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+              } else {
+                fastify.log.warn(`Order ${orderNum} UPDATE - No company found with customer_custnum=${custNum}`);
               }
+            } else {
+              fastify.log.warn(`Order ${orderNum} UPDATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.warn(`Failed to associate company for order ${orderNum}: ${associationError.message}`);
+            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
           }
 
           // Check if this order has a matching quote and update it to Closed Won
@@ -234,23 +241,30 @@ async function orderService(fastify, _) {
 
           try {
             const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
+            fastify.log.info(`Order ${orderNum} CREATE - Raw CustNum: ${order.OrderHed_CustNum}, Padded: ${custNum}`);
             if (custNum) {
               const companySearch = await fastify.backoff(() =>
                 fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
+              fastify.log.info(`Order ${orderNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
+                fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate company ${companySearch.results[0].id} with deal ${dealId} using type 5`);
+                const associationResult = await fastify.hubspotAdapter.createAssociation(
                   'companies',
                   companySearch.results[0].id,
                   'deals',
                   dealId,
                   5
                 );
-                fastify.log.info(`Associated order deal ${dealId} with company ${companySearch.results[0].id}`);
+                fastify.log.info(`Order ${orderNum} CREATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+              } else {
+                fastify.log.warn(`Order ${orderNum} CREATE - No company found with customer_custnum=${custNum}`);
               }
+            } else {
+              fastify.log.warn(`Order ${orderNum} CREATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.warn(`Failed to associate company for order ${orderNum}: ${associationError.message}`);
+            fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
           }
 
           // Check if this order has a matching quote and update it to Closed Won

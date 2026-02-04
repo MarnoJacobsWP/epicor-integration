@@ -193,23 +193,30 @@ async function quoteService(fastify, _) {
 
           try {
             const custNum = quote.QuoteHed_CustNum ? padCustNum(quote.QuoteHed_CustNum) : null;
+            fastify.log.info(`Quote ${quoteNum} UPDATE - Raw CustNum: ${quote.QuoteHed_CustNum}, Padded: ${custNum}`);
             if (custNum) {
               const companySearch = await fastify.backoff(() =>
                 fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
+              fastify.log.info(`Quote ${quoteNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
+                fastify.log.info(`Quote ${quoteNum} UPDATE - Attempting to associate company ${companySearch.results[0].id} with deal ${dealId} using type 5`);
+                const associationResult = await fastify.hubspotAdapter.createAssociation(
                   'companies',
                   companySearch.results[0].id,
                   'deals',
                   dealId,
                   5
                 );
-                fastify.log.info(`Associated quote deal ${dealId} with company ${companySearch.results[0].id}`);
+                fastify.log.info(`Quote ${quoteNum} UPDATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+              } else {
+                fastify.log.warn(`Quote ${quoteNum} UPDATE - No company found with customer_custnum=${custNum}`);
               }
+            } else {
+              fastify.log.warn(`Quote ${quoteNum} UPDATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.warn(`Failed to associate company for quote ${quoteNum}: ${associationError.message}`);
+            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
           }
 
           results.updated++;
@@ -244,23 +251,30 @@ async function quoteService(fastify, _) {
 
           try {
             const custNum = quote.QuoteHed_CustNum ? padCustNum(quote.QuoteHed_CustNum) : null;
+            fastify.log.info(`Quote ${quoteNum} CREATE - Raw CustNum: ${quote.QuoteHed_CustNum}, Padded: ${custNum}`);
             if (custNum) {
               const companySearch = await fastify.backoff(() =>
                 fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
               );
+              fastify.log.info(`Quote ${quoteNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
+                fastify.log.info(`Quote ${quoteNum} CREATE - Attempting to associate company ${companySearch.results[0].id} with deal ${dealId} using type 5`);
+                const associationResult = await fastify.hubspotAdapter.createAssociation(
                   'companies',
                   companySearch.results[0].id,
                   'deals',
                   dealId,
                   5
                 );
-                fastify.log.info(`Associated quote deal ${dealId} with company ${companySearch.results[0].id}`);
+                fastify.log.info(`Quote ${quoteNum} CREATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+              } else {
+                fastify.log.warn(`Quote ${quoteNum} CREATE - No company found with customer_custnum=${custNum}`);
               }
+            } else {
+              fastify.log.warn(`Quote ${quoteNum} CREATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.warn(`Failed to associate company for quote ${quoteNum}: ${associationError.message}`);
+            fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
           }
 
           results.created++;
