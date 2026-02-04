@@ -160,16 +160,17 @@ async function qSeatEtabService(fastify, _) {
               await createDataBase(dbData);
             }
 
-            if (result.new && dealId) {
+            if (dealId && result.id) {
               try {
-                await fastify.backoff(() =>
-                  fastify.hubspotAdapter._makeRequest('PUT', 
-                    `/crm/v4/objects/line_items/${result.id}/associations/deals/${dealId}/20`
-                  )
+                await fastify.hubspotAdapter.createAssociation(
+                  'line_items',
+                  result.id,
+                  'deals',
+                  dealId,
+                  20
                 );
-                fastify.log.debug(`Associated QSeatEtab line item ${result.id} to deal ${dealId}`);
-              } catch (error) {
-                fastify.log.error(`Failed to associate QSeatEtab line item ${result.id} to deal ${dealId}:`, error.message);
+              } catch (assocError) {
+                fastify.log.warn(`Failed to associate line item ${result.id} with deal ${dealId}: ${assocError.message}`);
               }
             }
           }
@@ -288,6 +289,20 @@ async function qSeatEtabService(fastify, _) {
             });
           }
 
+          if (dealId) {
+            try {
+              await fastify.hubspotAdapter.createAssociation(
+                'line_items',
+                lineItemId,
+                'deals',
+                dealId,
+                20
+              );
+            } catch (assocError) {
+              fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
+            }
+          }
+
           results.updated++;
         } else {
           const associations = dealId ? [{
@@ -384,6 +399,7 @@ async function qSeatEtabService(fastify, _) {
 
   if (!fastify.hasDecorator('qSeatEtabService')) {
     fastify.decorate('qSeatEtabService', {
+      syncLineItemsForQuote,
       syncLineItemsForQuoteWithData,
       task,
     });
@@ -394,7 +410,9 @@ export default fp(qSeatEtabService, {
   name: 'qSeatEtabService',
   dependencies: [
     'lineItemRepository',
+    'epicorAdapter',
     'hubspotAdapter',
     'backoff',
+    'constants',
   ],
 });

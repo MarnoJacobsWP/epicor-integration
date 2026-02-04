@@ -182,7 +182,13 @@ async function quoteService(fastify, _) {
           try {
             await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
           } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
+            fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
+          } catch (lineItemError) {
+            fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
           }
 
           results.updated++;
@@ -206,7 +212,13 @@ async function quoteService(fastify, _) {
           try {
             await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
           } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${lineItemError.message}`);
+            fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
+          }
+
+          try {
+            await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
+          } catch (lineItemError) {
+            fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
           }
 
           results.created++;

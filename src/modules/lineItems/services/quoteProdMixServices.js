@@ -166,16 +166,17 @@ async function quoteProdMixService(fastify, _) {
               await createDataBase(dbData);
             }
 
-            if (result.new && dealId) {
+            if (dealId && result.id) {
               try {
-                await fastify.backoff(() =>
-                  fastify.hubspotAdapter._makeRequest('PUT', 
-                    `/crm/v4/objects/line_items/${result.id}/associations/deals/${dealId}/20`
-                  )
+                await fastify.hubspotAdapter.createAssociation(
+                  'line_items',
+                  result.id,
+                  'deals',
+                  dealId,
+                  20
                 );
-                fastify.log.debug(`Associated QuoteProdMix line item ${result.id} to deal ${dealId}`);
-              } catch (error) {
-                fastify.log.error(`Failed to associate QuoteProdMix line item ${result.id} to deal ${dealId}:`, error.message);
+              } catch (assocError) {
+                fastify.log.warn(`Failed to associate line item ${result.id} with deal ${dealId}: ${assocError.message}`);
               }
             }
           }
@@ -289,6 +290,20 @@ async function quoteProdMixService(fastify, _) {
             });
           }
 
+          if (dealId) {
+            try {
+              await fastify.hubspotAdapter.createAssociation(
+                'line_items',
+                lineItemId,
+                'deals',
+                dealId,
+                20
+              );
+            } catch (assocError) {
+              fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
+            }
+          }
+
           results.updated++;
         } else {
           const associations = dealId ? [{
@@ -374,6 +389,22 @@ async function quoteProdMixService(fastify, _) {
     };
   }
 
+  async function syncLineItemsForQuote(quoteNum, dealId) {
+    fastify.log.info(`Fetching QuoteProdMix line items for quote ${quoteNum}...`);
+    const { records } = await fastify.epicorAdapter.fetchRelatedRecords(
+      fastify.constants.ENDPOINTS.QUOTE_PROD_MIX,
+      'QuoteDtl_QuoteNum',
+      quoteNum
+    );
+    
+    if (!records?.length) {
+      fastify.log.info(`No QuoteProdMix line items found for quote ${quoteNum}`);
+      return { success: true, message: 'No QuoteProdMix line items for this quote', lineItemCount: 0 };
+    }
+
+    return await syncLineItemsForQuoteWithData(quoteNum, dealId, records);
+  }
+
   async function task(dateString) {
     try {
       fastify.log.info('Processing Tasks for Quote Line Items');
@@ -386,6 +417,7 @@ async function quoteProdMixService(fastify, _) {
 
   if (!fastify.hasDecorator('quoteProdMixService')) {
     fastify.decorate('quoteProdMixService', {
+      syncLineItemsForQuote,
       syncLineItemsForQuoteWithData,
       task,
     });
@@ -396,7 +428,9 @@ export default fp(quoteProdMixService, {
   name: 'quoteProdMixService',
   dependencies: [
     'lineItemRepository',
+    'epicorAdapter',
     'hubspotAdapter',
     'backoff',
+    'constants',
   ],
 });

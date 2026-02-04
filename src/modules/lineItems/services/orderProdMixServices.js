@@ -155,6 +155,20 @@ async function orderProdMixService(fastify, _) {
             } else {
               await createDataBase(dbData);
             }
+
+            if (dealId && result.id) {
+              try {
+                await fastify.hubspotAdapter.createAssociation(
+                  'line_items',
+                  result.id,
+                  'deals',
+                  dealId,
+                  20
+                );
+              } catch (assocError) {
+                fastify.log.warn(`Failed to associate line item ${result.id} with deal ${dealId}: ${assocError.message}`);
+              }
+            }
           }
         }
       }
@@ -264,6 +278,20 @@ async function orderProdMixService(fastify, _) {
               orderNum: lineItem.OrderDtl_OrderNum,
               action: 'create'
             });
+          }
+
+          if (dealId) {
+            try {
+              await fastify.hubspotAdapter.createAssociation(
+                'line_items',
+                lineItemId,
+                'deals',
+                dealId,
+                20
+              );
+            } catch (assocError) {
+              fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
+            }
           }
 
           results.updated++;
