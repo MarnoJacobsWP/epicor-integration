@@ -1,10 +1,5 @@
 import fp from 'fastify-plugin';
-
-const padCustNum = (value) => {
-  if (!value) return null;
-  const str = String(value).trim();
-  return str.padStart(4, '0');
-};
+import { padCustNum } from '../../../utils/arrayHelpers.js';
 
 const toMidnightUTC = (v) => {
   const d = new Date(v);

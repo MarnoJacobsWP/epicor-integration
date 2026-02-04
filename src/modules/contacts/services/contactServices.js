@@ -1,10 +1,5 @@
 import fp from 'fastify-plugin';
-
-const padCustNum = (value) => {
-  if (!value) return null;
-  const str = String(value).trim();
-  return str.padStart(4, '0');
-};
+import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
 
 const FIELD_MAPPINGS = [
   { epicor: 'CustCnt_CustNum', hubspot: 'custcnt_custnum', transform: padCustNum },
@@ -26,14 +21,6 @@ function transformEpicorToHubSpot(epicorContact) {
     }
   }
   return result;
-}
-
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
 }
 
 async function contactService(fastify, _) {

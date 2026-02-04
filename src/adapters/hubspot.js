@@ -629,6 +629,19 @@ class HubspotAdapter {
     return response.data;
   }
 
+  async getAssociations(fromObjectType, fromObjectId, toObjectType) {
+    try {
+      const response = await this._makeRequest(
+        'GET',
+        `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}`
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.warn(`Failed to get associations for ${fromObjectType} ${fromObjectId} to ${toObjectType}: ${error.message}`);
+      return { results: [] };
+    }
+  }
+
   async createAssociation(fromObjectType, fromObjectId, toObjectType, toObjectId, associationTypeId) {
     const body = [
       {

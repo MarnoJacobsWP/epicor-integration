@@ -1,10 +1,5 @@
 import fp from 'fastify-plugin';
-
-const padCustNum = (value) => {
-  if (!value) return null;
-  const str = String(value).trim();
-  return str.padStart(4, '0');
-};
+import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
 
 const VALID_SALESREP_OPTIONS = new Set([
   'CYA', 'House', 'Murphy Associates', 'Mike Kilcoyne and Associates', 
@@ -49,14 +44,6 @@ function transformEpicorToHubSpot(epicorCustomer) {
     }
   }
   return result;
-}
-
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
 }
 
 async function customerService(fastify, _) {
