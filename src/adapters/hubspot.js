@@ -630,9 +630,16 @@ class HubspotAdapter {
   }
 
   async createAssociation(fromObjectType, fromObjectId, toObjectType, toObjectId, associationTypeId) {
+    const body = [
+      {
+        associationCategory: 'HUBSPOT_DEFINED',
+        associationTypeId: associationTypeId
+      }
+    ];
     return this._makeRequest(
       'PUT',
-      `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}/${associationTypeId}`
+      `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}`,
+      body
     );
   }
 
