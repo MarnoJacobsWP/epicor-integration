@@ -16,7 +16,7 @@ const VALID_SALESREP_NAMES = [
   'House', 'Mike Kilcoyne and Associates', 'Phillips Contract Group, LLC', 'CYA',
   'Reagan Penny', 'Dan Martin', 'Murphy Associates', 'Bruce Longhino Group',
   'Morgan Associates', 'Mike Fabionar', 'Ginger Grant', 'Lauren East',
-  'Elizabeth Gerber', 'Jennifer Gates', 'Unknown Option'
+  'Elizabeth Gerber', 'Jennifer Gates', 'John Parrish', 'Unknown Option'
 ];
 
 const toValidSalesRep = (v) => {
@@ -385,7 +385,7 @@ async function quoteService(fastify, _) {
         }
 
         Object.keys(props).forEach(key => {
-          if (props[key] === null || props[key] === undefined) {
+          if (props[key] === null || props[key] === undefined || props[key] === '') {
             delete props[key];
           }
         });
