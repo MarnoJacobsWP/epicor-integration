@@ -28,7 +28,7 @@ export const constants = {
     INITIAL_SKIP: 0,
   },
   REQUEST_TIMEOUT: process.env.NODE_ENV === 'production' ? 45000 : 30000,
-  FILTER_TIMESTAMP: 1770113695,
+  FILTER_TIMESTAMP: 1768505613,
   TABLE_RELATIONSHIPS: {
     ORDER_PROD_MIX: {
       parentTable: 'ORDERS',
