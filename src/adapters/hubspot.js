@@ -491,7 +491,16 @@ class HubspotAdapter {
       return { results: allResults };
       
     } catch (error) {
-      this.logger.error(`Batch search deals failed: ${error.message}`);
+      this.logger.error(`Batch search deals failed: ${error.message}`, {
+        propertyName,
+        values,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        hubspotError: error.response?.data,
+        hubspotMessage: error.response?.data?.message,
+        category: error.response?.data?.category,
+        validationResults: error.response?.data?.validationResults
+      });
       throw error;
     }
   }

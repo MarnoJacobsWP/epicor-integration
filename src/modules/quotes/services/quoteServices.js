@@ -461,18 +461,7 @@ async function quoteService(fastify, _) {
         }
 
       } catch (error) {
-        fastify.log.error(`Individual quote ${quoteNum} failed:`, {
-          error: error.message,
-          stack: error.stack,
-          quoteNum: quoteNum,
-          quoteData: {
-            QuoteHed_QuoteNum: quote.QuoteHed_QuoteNum,
-            QuoteHed_CustNum: quote.QuoteHed_CustNum,
-            Customer_Name: quote.Customer_Name,
-            dealname: generateDealName(quote)
-          },
-          properties: props
-        });
+        fastify.log.error(`Individual quote ${quoteNum} failed: ${error.message} ${error.stack} ${quoteNum} ${error.response?.status} ${error.response?.statusText} ${error.response?.data} ${error.response?.data?.message} ${error.response?.data?.category} ${error.response?.data?.errors} ${error.response?.data?.validationResults} ${quoteData} ${props}`)
         results.errors++;
       }
     }

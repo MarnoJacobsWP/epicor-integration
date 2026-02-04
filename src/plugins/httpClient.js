@@ -42,7 +42,12 @@ export default fp(
           url: error.config?.url,
           method: error.config?.method,
           status: error.response?.status,
-          message: error.message
+          statusText: error.response?.statusText,
+          message: error.message,
+          responseData: error.response?.data,
+          hubspotError: error.response?.data?.message,
+          hubspotCategory: error.response?.data?.category,
+          validationResults: error.response?.data?.validationResults
         });
         return Promise.reject(error);
       }
