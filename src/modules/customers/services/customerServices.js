@@ -95,8 +95,7 @@ async function customerService(fastify, _) {
     
     for (const customer of customers) {
       try {
-        const cleanedCustomer = validateAndCleanCustomer(customer);
-        const custId = cleanedCustomer.Customer_CustID || cleanedCustomer.Customer_CustNum;
+        const custId = customer.Customer_CustID || customer.Customer_CustNum;
         
         if (!custId) {
           results.skipped++;
@@ -117,7 +116,7 @@ async function customerService(fastify, _) {
           continue;
         }
 
-        let properties = transformEpicorToHubSpot(cleanedCustomer);
+        let properties = transformEpicorToHubSpot(customer);
         
         if (!properties.name || properties.name.trim() === '') {
           fastify.log.warn(`Customer ${custIdStr} has empty name, using ID as name`);
