@@ -216,7 +216,7 @@ async function quoteService(fastify, _) {
               fastify.log.warn(`Quote ${quoteNum} UPDATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: ${associationError.message} ${associationError.response?.data} ${associationError}`);
+            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
           }
 
           results.updated++;
@@ -274,7 +274,7 @@ async function quoteService(fastify, _) {
               fastify.log.warn(`Quote ${quoteNum} CREATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
+            fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
           }
 
           results.created++;

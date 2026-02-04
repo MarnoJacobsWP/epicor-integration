@@ -201,7 +201,7 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Order ${orderNum} UPDATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: ${associationError.message} ${associationError.response?.data} ${associationError}`);
+            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
           }
 
           // Check if this order has a matching quote and update it to Closed Won
@@ -264,9 +264,8 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Order ${orderNum} CREATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: ${associationError.message}`, associationError.response?.data || associationError);
+            fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
           }
-
           // Check if this order has a matching quote and update it to Closed Won
           const quoteNum = order.OrderDtl_QuoteNum;
           if (quoteNum) {
