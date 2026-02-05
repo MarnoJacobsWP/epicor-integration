@@ -18,7 +18,7 @@ const toValidSalesRep = (salesRepName) => {
 
 const FIELD_MAPPINGS = [
   { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
-  { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: (v) => v ? String(v).trim() : null },
+  { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: padCustNum },
   { epicor: 'Customer_Name', hubspot: 'name', transform: (v) => v ? String(v).trim().substring(0, 200) : null },
   { epicor: 'Customer_Address1', hubspot: 'address', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
   { epicor: 'Customer_Address2', hubspot: 'address2', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
@@ -82,7 +82,8 @@ async function customerService(fastify, _) {
     
     for (const customer of customers) {
       try {
-        const custId = customer.Customer_CustID || customer.Customer_CustNum;
+        const custIdRaw = customer.Customer_CustID || customer.Customer_CustNum;
+        const custId = padCustNum(custIdRaw);
         
         if (!custId) {
           results.skipped++;
@@ -93,7 +94,7 @@ async function customerService(fastify, _) {
           continue;
         }
 
-        const custIdStr = String(custId).trim();
+        const custIdStr = custId ? String(custId).trim() : '';
         if (!custIdStr) {
           results.skipped++;
           failedCustomers.push({
@@ -265,10 +266,16 @@ async function customerService(fastify, _) {
     fastify.log.info(`Starting individual processing for ${customers.length} customers...`);
     
     for (const customer of customers) {
-      const custId = customer.Customer_CustID || customer.Customer_CustNum;
+      const custIdRaw = customer.Customer_CustID || customer.Customer_CustNum;
+      const custId = padCustNum(custIdRaw);
       const custName = customer.Customer_Name || 'unnamed';
 
       try {
+        if (!custId) {
+          results.skipped++;
+          continue;
+        }
+
         const query = {
           epicorId: customer.RowIdent,
           source: 'EpicorCustomers',
@@ -372,7 +379,7 @@ async function customerService(fastify, _) {
             hubspotId: companyId,
             epicorId: customer.RowIdent,
             source: 'EpicorCustomers',
-            customerId: custId,
+              customerId: custId,
             action: 'create'
           });
 
@@ -427,7 +434,8 @@ async function customerService(fastify, _) {
 
       const customerMap = new Map();
       for (const customer of records) {
-        const custId = customer.Customer_CustID || customer.Customer_CustNum;
+        const custIdRaw = customer.Customer_CustID || customer.Customer_CustNum;
+        const custId = padCustNum(custIdRaw);
         if (!custId) continue;
         
         const custIdStr = String(custId).trim();

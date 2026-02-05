@@ -44,6 +44,52 @@ async function contactService(fastify, _) {
     return await fastify.contactRepository.deleteDatabase(filter);
   }
 
+  async function upsertContactRecord({ contact, contactId, email, action }) {
+    const query = {
+      epicorId: contact.RowIdent,
+      source: 'EpicorContacts',
+    };
+
+    const dbData = {
+      hubspotId: contactId,
+      epicorId: contact.RowIdent,
+      source: 'EpicorContacts',
+      email,
+      action,
+      timestamp: new Date()
+    };
+
+    const existRecord = await infoRecord(query);
+    if (existRecord?.hubspotId) {
+      await updateDataBase(query, dbData);
+    } else {
+      await createDataBase(dbData);
+    }
+  }
+
+  async function associateContactToCompany(contact, contactId, email) {
+    try {
+      const custNum = contact.CustCnt_CustNum ? padCustNum(contact.CustCnt_CustNum) : null;
+      if (custNum) {
+        const companySearch = await fastify.backoff(() =>
+          fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+        );
+        if (companySearch.results?.[0]?.id) {
+          await fastify.hubspotAdapter.createAssociation(
+            'companies',
+            companySearch.results[0].id,
+            'contacts',
+            contactId,
+            2
+          );
+          fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
+        }
+      }
+    } catch (associationError) {
+      fastify.log.warn(`Failed to associate contact ${email}: ${associationError.message}`);
+    }
+  }
+
   async function processContactBatch(contacts) {
     const results = {
       total: contacts.length,
@@ -54,7 +100,8 @@ async function contactService(fastify, _) {
       skipped: 0
     };
 
-    const batchData = [];
+    const preparedContacts = [];
+    const emailList = [];
     
     for (const contact of contacts) {
       try {
@@ -88,10 +135,13 @@ async function contactService(fastify, _) {
           continue;
         }
         
-        batchData.push({
+        preparedContacts.push({
           id: emailStr,
+          email: emailStr,
+          contact,
           properties: cleanProperties
         });
+        emailList.push(emailStr);
         
       } catch (error) {
         results.errors++;
@@ -102,12 +152,61 @@ async function contactService(fastify, _) {
       }
     }
 
-    if (batchData.length === 0) {
+    if (preparedContacts.length === 0) {
       fastify.log.warn('No valid contact data for batch processing');
       return results;
     }
 
-    fastify.log.info(`Prepared ${batchData.length} contacts for batch upsert`);
+    let existingByEmail = new Map();
+    let precheckFailed = false;
+    try {
+      const searchData = await fastify.backoff(() =>
+        fastify.hubspotAdapter.searchContactsByProperty('email', emailList)
+      );
+      if (searchData.results?.length) {
+        existingByEmail = new Map(
+          searchData.results
+            .map(result => [String(result.properties?.email || '').trim().toLowerCase(), result.id])
+            .filter(([email]) => email)
+        );
+      }
+    } catch (searchError) {
+      precheckFailed = true;
+      fastify.log.warn(`Contact pre-check failed, falling back to individual processing: ${searchError.message}`);
+    }
+
+    if (precheckFailed) {
+      await processContactsIndividually(contacts, results);
+      return results;
+    }
+
+    const batchData = [];
+    for (const item of preparedContacts) {
+      const existingId = existingByEmail.get(item.email);
+      if (existingId) {
+        results.skipped++;
+        await upsertContactRecord({
+          contact: item.contact,
+          contactId: existingId,
+          email: item.email,
+          action: 'skipped_existing'
+        });
+        await associateContactToCompany(item.contact, existingId, item.email);
+        continue;
+      }
+
+      batchData.push({
+        id: item.id,
+        properties: item.properties
+      });
+    }
+
+    if (batchData.length === 0) {
+      fastify.log.warn('All contacts already exist in HubSpot; no new contacts to create');
+      return results;
+    }
+
+    fastify.log.info(`Prepared ${batchData.length} contacts for batch create (existing contacts skipped)`);
 
     try {
       const upsertResult = await fastify.backoff(() =>
@@ -123,54 +222,20 @@ async function contactService(fastify, _) {
           });
           
           if (originalContact) {
-            const query = {
-              epicorId: originalContact.RowIdent,
-              source: 'EpicorContacts',
-            };
-
-            const dbData = {
-              hubspotId: result.id,
-              epicorId: originalContact.RowIdent,
-              source: 'EpicorContacts',
-              email: email,
-              action: result.new ? 'create' : 'update',
-              timestamp: new Date()
-            };
-
             if (result.new) {
               results.created++;
             } else {
-              results.updated++;
+              results.skipped++;
             }
 
-            let existRecord = await infoRecord(query);
-            
-            if (existRecord?.hubspotId) {
-              await updateDataBase(query, dbData);
-            } else {
-              await createDataBase(dbData);
-            }
+            await upsertContactRecord({
+              contact: originalContact,
+              contactId: result.id,
+              email,
+              action: result.new ? 'create' : 'skipped_existing'
+            });
 
-            try {
-              const custNum = originalContact.CustCnt_CustNum ? padCustNum(originalContact.CustCnt_CustNum) : null;
-              if (custNum) {
-                const companySearch = await fastify.backoff(() =>
-                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-                );
-                if (companySearch.results?.[0]?.id) {
-                  await fastify.hubspotAdapter.createAssociation(
-                    'companies',
-                    companySearch.results[0].id,
-                    'contacts',
-                    result.id,
-                    2
-                  );
-                  fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
-                }
-              }
-            } catch (associationError) {
-              fastify.log.warn(`Failed to associate contact ${email}: ${associationError.message}`);
-            }
+            await associateContactToCompany(originalContact, result.id, email);
           }
         }
       }
@@ -250,91 +315,30 @@ async function contactService(fastify, _) {
         if (existRecord?.id || existRecord?.hubspotId) {
           const contactId = existRecord?.hubspotId || existRecord?.id;
 
-          try {
-            await fastify.backoff(() =>
-              fastify.hubspotAdapter.updateContact({ 
-                contactId, 
-                properties: cleanProps 
-              })
-            );
-          } catch (updateError) {
-            if (updateError?.response?.data?.message?.toLowerCase() === 'resource not found') {
-              await deleteDataBase(query);
-            } else {
-              throw updateError;
-            }
-          }
+          await upsertContactRecord({
+            contact,
+            contactId,
+            email,
+            action: 'skipped_existing'
+          });
 
-          if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action: 'update', timestamp: new Date() });
-          } else {
-            await createDataBase({
-              hubspotId: contactId,
-              epicorId: contact.RowIdent,
-              source: 'EpicorContacts',
-              email: email,
-              action: 'create',
-              timestamp: new Date()
-            });
-          }
+          await associateContactToCompany(contact, contactId, email);
 
-          try {
-            const custNum = contact.CustCnt_CustNum ? padCustNum(contact.CustCnt_CustNum) : null;
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
-                  'companies',
-                  companySearch.results[0].id,
-                  'contacts',
-                  contactId,
-                  2
-                );
-                fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
-              }
-            }
-          } catch (associationError) {
-            fastify.log.warn(`Failed to associate contact ${email}: ${associationError.message}`);
-          }
-
-          results.updated++;
+          results.skipped++;
         } else {
           const created = await fastify.backoff(() =>
             fastify.hubspotAdapter.createContact({ properties: cleanProps })
           );
           const contactId = created.id;
 
-          await createDataBase({
-            hubspotId: contactId,
-            epicorId: contact.RowIdent,
-            source: 'EpicorContacts',
-            email: email,
-            action: 'create',
-            timestamp: new Date()
+          await upsertContactRecord({
+            contact,
+            contactId,
+            email,
+            action: 'create'
           });
 
-          try {
-            const custNum = contact.CustCnt_CustNum ? padCustNum(contact.CustCnt_CustNum) : null;
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              if (companySearch.results?.[0]?.id) {
-                await fastify.hubspotAdapter.createAssociation(
-                  'companies',
-                  companySearch.results[0].id,
-                  'contacts',
-                  contactId,
-                  2
-                );
-                fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
-              }
-            }
-          } catch (associationError) {
-            fastify.log.warn(`Failed to associate contact ${email}: ${associationError.message}`);
-          }
+          await associateContactToCompany(contact, contactId, email);
 
           results.created++;
         }

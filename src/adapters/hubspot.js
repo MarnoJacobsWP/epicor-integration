@@ -491,6 +491,18 @@ class HubspotAdapter {
     }
   }
 
+  async getDealById({ dealId, properties = [] }) {
+    const params = new URLSearchParams();
+    if (properties.length) {
+      params.set('properties', properties.join(','));
+    }
+
+    const queryString = params.toString();
+    const path = queryString ? `/crm/v3/objects/deals/${dealId}?${queryString}` : `/crm/v3/objects/deals/${dealId}`;
+    const response = await this._makeRequest('GET', path);
+    return response.data;
+  }
+
   async createCompany({ properties }) {
     const cleanedProperties = {};
     for (const [key, value] of Object.entries(properties || {})) {

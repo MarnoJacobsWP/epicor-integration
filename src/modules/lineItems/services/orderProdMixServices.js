@@ -1,8 +1,19 @@
 import fp from 'fastify-plugin';
 
+const VALID_PRODGRUP_OPTIONS = [
+  'Discounted Products', 'E-Tables', 'EVO', 'Free Standing', 'Glass',
+  'New Casegoods, Training Tables', 'Panel Sales', 'Peds / Laterals',
+  'Power Beam', 'Seating', 'PET', 'Xpand', 'Unknown Option'
+];
+
+const toValidProdGrup = (v) => {
+  if (!v) return 'Unknown Option';
+  return VALID_PRODGRUP_OPTIONS.includes(v) ? v : 'Unknown Option';
+};
+
 const FIELD_MAPPINGS = [
   { epicor: 'OrderDtl_OrderNum', hubspot: 'orderdtl_ordernum', transform: Number },
-  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01' },
+  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_characterna', transform: toValidProdGrup },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
   { epicor: 'RowIdent', hubspot: 'rowident_' },
 ];
@@ -20,6 +31,7 @@ function transformEpicorToHubSpot(epicorRecord) {
 }
 
 async function orderProdMixService(fastify, _) {
+  const { ENDPOINTS } = fastify.constants;
   const UNIQUE_PROPERTY = 'rowident_';
 
   async function infoRecord(data) {
@@ -38,6 +50,33 @@ async function orderProdMixService(fastify, _) {
     return await fastify.lineItemRepository.deleteDatabase(filter);
   }
 
+  async function appendDealProdGrupValue(dealId, prodGrupValue) {
+    if (!dealId || !prodGrupValue) return;
+
+    const propertyName = 'prodgrup_characterna';
+    try {
+      const deal = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getDealById({ dealId, properties: [propertyName] })
+      );
+
+      const existing = deal?.properties?.[propertyName] || '';
+      const values = new Set(String(existing).split(';').filter(Boolean));
+      values.add(prodGrupValue);
+
+      const updated = Array.from(values).join(';');
+      if (updated && updated !== existing) {
+        await fastify.backoff(() =>
+          fastify.hubspotAdapter.updateDeal({
+            dealId,
+            properties: { [propertyName]: updated }
+          })
+        );
+      }
+    } catch (error) {
+      fastify.log.warn(`Failed to append prod group value to deal ${dealId}: ${error.message}`);
+    }
+  }
+
   async function processLineItemsIndividually(lineItems, dealId, results) {
     fastify.log.info(`Starting individual processing for ${lineItems.length} line items...`);
     
@@ -46,13 +85,13 @@ async function orderProdMixService(fastify, _) {
 
       try {
         const props = transformEpicorToHubSpot(lineItem);
-        props.name = props.prodgrup_character01 || 'Unnamed Product';
+        props.name = props.prodgrup_characterna || 'Unnamed Product';
 
         const cleanProps = {
           name: props.name,
           price: props.price,
           rowident_: props.rowident_,
-          prodgrup_character01: props.prodgrup_character01
+          prodgrup_characterna: props.prodgrup_characterna
         };
 
         Object.keys(cleanProps).forEach(key => {
@@ -126,6 +165,8 @@ async function orderProdMixService(fastify, _) {
             } catch (assocError) {
               fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
             }
+
+            await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
           }
 
           results.updated++;
@@ -149,6 +190,10 @@ async function orderProdMixService(fastify, _) {
           });
 
           results.created++;
+
+          if (dealId) {
+            await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
+          }
         }
 
       } catch (error) {
