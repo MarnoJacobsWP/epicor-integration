@@ -668,6 +668,31 @@ class HubspotAdapter {
     );
   }
 
+  async ensureAssociation(fromObjectType, fromObjectId, toObjectType, toObjectId, associationTypeId) {
+    try {
+      const existing = await this.getAssociations(fromObjectType, fromObjectId, toObjectType);
+      const exists = existing?.results?.some(result => {
+        const targetId = result?.toObjectId || result?.id || result?.toObjectId;
+        return String(targetId) === String(toObjectId);
+      });
+
+      if (exists) {
+        return { skipped: true };
+      }
+
+      return await this.createAssociation(
+        fromObjectType,
+        fromObjectId,
+        toObjectType,
+        toObjectId,
+        associationTypeId
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to ensure association ${fromObjectType} ${fromObjectId} -> ${toObjectType} ${toObjectId}: ${error.message}`);
+      return { skipped: false, error };
+    }
+  }
+
   async getAssociationTypes(fromObjectType, toObjectType) {
     try {
       const response = await this._makeRequest(

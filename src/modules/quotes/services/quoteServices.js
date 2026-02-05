@@ -85,6 +85,17 @@ async function quoteService(fastify, _) {
     return await fastify.quoteRepository.deleteDatabase(filter);
   }
 
+  async function ensureDealCompanyAssociation(dealId, companyId) {
+    if (!dealId || !companyId) return;
+    await fastify.hubspotAdapter.ensureAssociation(
+      'deals',
+      dealId,
+      'companies',
+      companyId,
+      5
+    );
+  }
+
   async function processQuotesIndividually(quotes, results) {
     fastify.log.info(`Starting individual processing for ${quotes.length} quotes...`);
     
@@ -117,6 +128,21 @@ async function quoteService(fastify, _) {
               validationResults: JSON.stringify(searchError.response?.data?.validationResults)
             }, `Search failed for quote ${quoteNum}`);
             existRecord = null;
+          }
+        }
+
+        if (!existRecord) {
+          const dealName = generateDealName(quote);
+          try {
+            const nameSearch = await fastify.backoff(() =>
+              fastify.hubspotAdapter.searchDealsByProperty('dealname', [dealName])
+            );
+            existRecord = nameSearch.results?.[0] || null;
+            if (existRecord) {
+              fastify.log.info(`Matched quote ${quoteNum} by deal name to deal ${existRecord.id}`);
+            }
+          } catch (searchError) {
+            fastify.log.warn(`Deal name search failed for quote ${quoteNum}: ${searchError.message}`);
           }
         }
 
@@ -196,14 +222,7 @@ async function quoteService(fastify, _) {
               fastify.log.info(`Quote ${quoteNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
                 fastify.log.info(`Quote ${quoteNum} UPDATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const associationResult = await fastify.hubspotAdapter.createAssociation(
-                  'deals',
-                  dealId,
-                  'companies',
-                  companySearch.results[0].id,
-                  5
-                );
-                fastify.log.info(`Quote ${quoteNum} UPDATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+                await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
               } else {
                 fastify.log.warn(`Quote ${quoteNum} UPDATE - No company found with customer_custnum=${custNum}`);
               }
@@ -254,14 +273,7 @@ async function quoteService(fastify, _) {
               fastify.log.info(`Quote ${quoteNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
                 fastify.log.info(`Quote ${quoteNum} CREATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const associationResult = await fastify.hubspotAdapter.createAssociation(
-                  'deals',
-                  dealId,
-                  'companies',
-                  companySearch.results[0].id,
-                  5
-                );
-                fastify.log.info(`Quote ${quoteNum} CREATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+                await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
               } else {
                 fastify.log.warn(`Quote ${quoteNum} CREATE - No company found with customer_custnum=${custNum}`);
               }

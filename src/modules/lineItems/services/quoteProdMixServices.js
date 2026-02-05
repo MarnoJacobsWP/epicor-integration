@@ -154,7 +154,7 @@ async function quoteProdMixService(fastify, _) {
 
           if (dealId) {
             try {
-              await fastify.hubspotAdapter.createAssociation(
+              await fastify.hubspotAdapter.ensureAssociation(
                 'line_items',
                 lineItemId,
                 'deals',

@@ -72,6 +72,17 @@ async function orderService(fastify, _) {
     return await fastify.orderRepository.deleteDatabase(filter);
   }
 
+  async function ensureDealCompanyAssociation(dealId, companyId) {
+    if (!dealId || !companyId) return;
+    await fastify.hubspotAdapter.ensureAssociation(
+      'deals',
+      dealId,
+      'companies',
+      companyId,
+      5
+    );
+  }
+
   async function updateMatchingQuote(quoteNum, orderNum, quoteDealId) {
     try {
       await fastify.backoff(() =>
@@ -101,7 +112,9 @@ async function orderService(fastify, _) {
     
     for (const order of orders) {
       const orderNum = order.OrderHed_OrderNum;
+      const quoteNum = order.OrderDtl_QuoteNum;
       let props = {};
+      let usedQuoteDeal = false;
 
       try {
         const query = {
@@ -119,6 +132,36 @@ async function orderService(fastify, _) {
             existRecord = searchData.results?.[0] || null;
           } catch (searchError) {
             existRecord = null;
+          }
+        }
+
+        if (!existRecord && quoteNum) {
+          try {
+            const quoteSearch = await fastify.backoff(() =>
+              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+            );
+            if (quoteSearch.results?.[0]) {
+              existRecord = quoteSearch.results[0];
+              usedQuoteDeal = true;
+              fastify.log.info(`Order ${orderNum} matched existing quote deal ${existRecord.id} for quote ${quoteNum}`);
+            }
+          } catch (searchError) {
+            fastify.log.warn(`Order ${orderNum} quote match search failed: ${searchError.message}`);
+          }
+        }
+
+        if (!existRecord) {
+          const dealName = generateDealName(order);
+          try {
+            const nameSearch = await fastify.backoff(() =>
+              fastify.hubspotAdapter.searchDealsByProperty('dealname', [dealName])
+            );
+            existRecord = nameSearch.results?.[0] || null;
+            if (existRecord) {
+              fastify.log.info(`Order ${orderNum} matched deal by name ${existRecord.id}`);
+            }
+          } catch (searchError) {
+            fastify.log.warn(`Order ${orderNum} deal name search failed: ${searchError.message}`);
           }
         }
 
@@ -181,14 +224,7 @@ async function orderService(fastify, _) {
               fastify.log.info(`Order ${orderNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
                 fastify.log.info(`Order ${orderNum} UPDATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const associationResult = await fastify.hubspotAdapter.createAssociation(
-                  'deals',
-                  dealId,
-                  'companies',
-                  companySearch.results[0].id,
-                  5
-                );
-                fastify.log.info(`Order ${orderNum} UPDATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+                await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
               } else {
                 fastify.log.warn(`Order ${orderNum} UPDATE - No company found with customer_custnum=${custNum}`);
               }
@@ -200,8 +236,7 @@ async function orderService(fastify, _) {
           }
 
           // Check if this order has a matching quote and update it to Closed Won
-          const quoteNum = order.OrderDtl_QuoteNum;
-          if (quoteNum) {
+          if (quoteNum && !usedQuoteDeal) {
             const quoteSearchData = await fastify.backoff(() =>
               fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
             );
@@ -244,14 +279,7 @@ async function orderService(fastify, _) {
               fastify.log.info(`Order ${orderNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
                 fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const associationResult = await fastify.hubspotAdapter.createAssociation(
-                  'deals',
-                  dealId,
-                  'companies',
-                  companySearch.results[0].id,
-                  5
-                );
-                fastify.log.info(`Order ${orderNum} CREATE - Association result: ${JSON.stringify(associationResult?.data || associationResult)}`);
+                await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
               } else {
                 fastify.log.warn(`Order ${orderNum} CREATE - No company found with customer_custnum=${custNum}`);
               }
@@ -262,8 +290,7 @@ async function orderService(fastify, _) {
             fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
           }
           // Check if this order has a matching quote and update it to Closed Won
-          const quoteNum = order.OrderDtl_QuoteNum;
-          if (quoteNum) {
+          if (quoteNum && !usedQuoteDeal) {
             const quoteSearchData = await fastify.backoff(() =>
               fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
             );
