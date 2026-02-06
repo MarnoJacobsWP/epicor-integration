@@ -730,6 +730,19 @@ class HubspotAdapter {
     }
   }
 
+  async getObjectProperty(objectType, propertyName) {
+    try {
+      const response = await this._makeRequest(
+        'GET',
+        `/crm/v3/properties/${objectType}/${propertyName}`
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.warn(`Failed to get property ${propertyName} for ${objectType}: ${error.message}`);
+      return null;
+    }
+  }
+
   async createAssociationV3(fromObjectType, fromObjectId, toObjectType, toObjectId, associationCategory) {
     // V3 API uses association categories instead of type IDs
     return this._makeRequest(

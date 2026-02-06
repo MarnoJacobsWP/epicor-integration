@@ -211,7 +211,7 @@ async function customerService(fastify, _) {
                   );
                   if (contactSearch.results?.length > 0) {
                     for (const contact of contactSearch.results) {
-                      await fastify.hubspotAdapter.createAssociation(
+                      await fastify.hubspotAdapter.ensureAssociation(
                         'companies',
                         result.id,
                         'contacts',
@@ -353,7 +353,7 @@ async function customerService(fastify, _) {
               );
               if (contactSearch.results?.length > 0) {
                 for (const contact of contactSearch.results) {
-                  await fastify.hubspotAdapter.createAssociation(
+                  await fastify.hubspotAdapter.ensureAssociation(
                     'companies',
                     companyId,
                     'contacts',
@@ -391,7 +391,7 @@ async function customerService(fastify, _) {
               );
               if (contactSearch.results?.length > 0) {
                 for (const contact of contactSearch.results) {
-                  await fastify.hubspotAdapter.createAssociation(
+                  await fastify.hubspotAdapter.ensureAssociation(
                     'companies',
                     companyId,
                     'contacts',

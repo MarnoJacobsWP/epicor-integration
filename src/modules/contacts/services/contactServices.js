@@ -75,7 +75,7 @@ async function contactService(fastify, _) {
           fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
         );
         if (companySearch.results?.[0]?.id) {
-          await fastify.hubspotAdapter.createAssociation(
+          await fastify.hubspotAdapter.ensureAssociation(
             'companies',
             companySearch.results[0].id,
             'contacts',

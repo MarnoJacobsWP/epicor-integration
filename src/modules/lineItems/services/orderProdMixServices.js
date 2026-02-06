@@ -33,6 +33,7 @@ function transformEpicorToHubSpot(epicorRecord) {
 async function orderProdMixService(fastify, _) {
   const { ENDPOINTS } = fastify.constants;
   const UNIQUE_PROPERTY = 'rowident_';
+  let dealProdGrupPropertyCache = null;
 
   async function infoRecord(data) {
     return await fastify.lineItemRepository.findByIdProperty(data);
@@ -55,25 +56,64 @@ async function orderProdMixService(fastify, _) {
 
     const propertyName = 'prodgrup_characterna';
     try {
+      if (dealProdGrupPropertyCache === null) {
+        dealProdGrupPropertyCache = await fastify.hubspotAdapter.getObjectProperty('deals', propertyName);
+      }
+
+      if (!dealProdGrupPropertyCache) {
+        fastify.log.warn(`${dealId} - ${propertyName} - Property not found on deals; skipping update`);
+        return;
+      }
+
+      const options = Array.isArray(dealProdGrupPropertyCache.options)
+        ? dealProdGrupPropertyCache.options
+        : [];
+
+      const normalizedValue = String(prodGrupValue).trim();
+      let optionValue = normalizedValue;
+      if (options.length > 0) {
+        const optionMatch = options.find(opt =>
+          String(opt?.label || '').trim().toLowerCase() === normalizedValue.toLowerCase() ||
+          String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
+        );
+        if (!optionMatch?.value) {
+          fastify.log.warn(`${dealId} - ${propertyName} - Unknown option "${normalizedValue}"; skipping update`);
+          return;
+        }
+        optionValue = optionMatch.value;
+      }
+
+      const isMultiSelect = String(dealProdGrupPropertyCache.fieldType || '').toLowerCase() === 'checkbox';
+
       const deal = await fastify.backoff(() =>
         fastify.hubspotAdapter.getDealById({ dealId, properties: [propertyName] })
       );
 
       const existing = deal?.properties?.[propertyName] || '';
-      const values = new Set(String(existing).split(';').filter(Boolean));
-      values.add(prodGrupValue);
+      if (isMultiSelect) {
+        const values = new Set(String(existing).split(';').filter(Boolean));
+        values.add(optionValue);
 
-      const updated = Array.from(values).join(';');
-      if (updated && updated !== existing) {
+        const updated = Array.from(values).join(';');
+        if (updated && updated !== existing) {
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateDeal({
+              dealId,
+              properties: { [propertyName]: updated }
+            })
+          );
+        }
+      } else if (optionValue && optionValue !== existing) {
         await fastify.backoff(() =>
           fastify.hubspotAdapter.updateDeal({
             dealId,
-            properties: { [propertyName]: updated }
+            properties: { [propertyName]: optionValue }
           })
         );
       }
     } catch (error) {
-      fastify.log.warn(`${dealId} - ${propertyName} - ${prodGrupValue} - ${error.response?.data} - Failed to append prod group value to deal ${dealId}: ${error.message}`);
+      const errorData = error.response?.data ? JSON.stringify(error.response.data) : 'no_error_data';
+      fastify.log.warn(`${dealId} - ${propertyName} - ${prodGrupValue} - ${errorData} - Failed to append prod group value to deal ${dealId}: ${error.message}`);
     }
   }
 
