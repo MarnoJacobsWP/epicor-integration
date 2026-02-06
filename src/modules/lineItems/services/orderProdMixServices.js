@@ -73,7 +73,7 @@ async function orderProdMixService(fastify, _) {
         );
       }
     } catch (error) {
-      fastify.log.warn(`Failed to append prod group value to deal ${dealId}: ${error.message}`);
+      fastify.log.warn(`${dealId} - ${propertyName} - ${prodGrupValue} - ${error.response?.data} - Failed to append prod group value to deal ${dealId}: ${error.message}`);
     }
   }
 
@@ -155,13 +155,14 @@ async function orderProdMixService(fastify, _) {
 
           if (dealId) {
             try {
-              await fastify.hubspotAdapter.ensureAssociation(
+              const assocResult = await fastify.hubspotAdapter.ensureAssociation(
                 'line_items',
                 lineItemId,
                 'deals',
                 dealId,
                 20
               );
+              fastify.log.info(`OrderProdMix line item ${lineItemId} association ${assocResult?.skipped ? 'skipped' : 'created'} for deal ${dealId}`);
             } catch (assocError) {
               fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
             }

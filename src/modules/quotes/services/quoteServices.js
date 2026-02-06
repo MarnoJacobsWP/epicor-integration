@@ -86,8 +86,8 @@ async function quoteService(fastify, _) {
   }
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
-    if (!dealId || !companyId) return;
-    await fastify.hubspotAdapter.ensureAssociation(
+    if (!dealId || !companyId) return { skipped: true };
+    return await fastify.hubspotAdapter.ensureAssociation(
       'deals',
       dealId,
       'companies',
@@ -222,7 +222,8 @@ async function quoteService(fastify, _) {
               fastify.log.info(`Quote ${quoteNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
                 fastify.log.info(`Quote ${quoteNum} UPDATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
+                const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
+                fastify.log.info(`Quote ${quoteNum} UPDATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
               } else {
                 fastify.log.warn(`Quote ${quoteNum} UPDATE - No company found with customer_custnum=${custNum}`);
               }
@@ -273,7 +274,8 @@ async function quoteService(fastify, _) {
               fastify.log.info(`Quote ${quoteNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
               if (companySearch.results?.[0]?.id) {
                 fastify.log.info(`Quote ${quoteNum} CREATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
+                const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
+                fastify.log.info(`Quote ${quoteNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
               } else {
                 fastify.log.warn(`Quote ${quoteNum} CREATE - No company found with customer_custnum=${custNum}`);
               }

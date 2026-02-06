@@ -641,11 +641,20 @@ class HubspotAdapter {
     return response.data;
   }
 
-  async getAssociations(fromObjectType, fromObjectId, toObjectType) {
+  async getAssociations(fromObjectType, fromObjectId, toObjectType, options = {}) {
     try {
+      const params = new URLSearchParams();
+      if (options.limit) params.set('limit', String(options.limit));
+      if (options.after) params.set('after', String(options.after));
+
+      const queryString = params.toString();
+      const path = queryString
+        ? `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}?${queryString}`
+        : `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}`;
+
       const response = await this._makeRequest(
         'GET',
-        `/crm/v4/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}`
+        path
       );
       return response.data;
     } catch (error) {
@@ -670,14 +679,14 @@ class HubspotAdapter {
 
   async ensureAssociation(fromObjectType, fromObjectId, toObjectType, toObjectId, associationTypeId) {
     try {
-      const existing = await this.getAssociations(fromObjectType, fromObjectId, toObjectType);
-      const exists = existing?.results?.some(result => {
-        const targetId = result?.toObjectId || result?.id || result?.toObjectId;
-        return String(targetId) === String(toObjectId);
-      });
+      const existsForward = await this._associationExists(fromObjectType, fromObjectId, toObjectType, toObjectId);
+      if (existsForward) {
+        return { skipped: true, direction: 'forward' };
+      }
 
-      if (exists) {
-        return { skipped: true };
+      const existsReverse = await this._associationExists(toObjectType, toObjectId, fromObjectType, fromObjectId);
+      if (existsReverse) {
+        return { skipped: true, direction: 'reverse' };
       }
 
       return await this.createAssociation(
@@ -691,6 +700,21 @@ class HubspotAdapter {
       this.logger.warn(`Failed to ensure association ${fromObjectType} ${fromObjectId} -> ${toObjectType} ${toObjectId}: ${error.message}`);
       return { skipped: false, error };
     }
+  }
+
+  async _associationExists(fromObjectType, fromObjectId, toObjectType, toObjectId) {
+    let after;
+    do {
+      const data = await this.getAssociations(fromObjectType, fromObjectId, toObjectType, { limit: 500, after });
+      const exists = data?.results?.some(result => {
+        const targetId = result?.toObjectId || result?.id;
+        return String(targetId) === String(toObjectId);
+      });
+      if (exists) return true;
+      after = data?.paging?.next?.after;
+    } while (after);
+
+    return false;
   }
 
   async getAssociationTypes(fromObjectType, toObjectType) {

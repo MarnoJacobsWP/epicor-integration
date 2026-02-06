@@ -123,13 +123,14 @@ async function qSeatEtabService(fastify, _) {
 
           if (dealId) {
             try {
-              await fastify.hubspotAdapter.ensureAssociation(
+              const assocResult = await fastify.hubspotAdapter.ensureAssociation(
                 'line_items',
                 lineItemId,
                 'deals',
                 dealId,
                 20
               );
+              fastify.log.info(`QSeatEtab line item ${lineItemId} association ${assocResult?.skipped ? 'skipped' : 'created'} for deal ${dealId}`);
             } catch (assocError) {
               fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
             }
