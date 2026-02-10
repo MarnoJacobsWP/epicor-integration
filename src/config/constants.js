@@ -29,7 +29,7 @@ export const constants = {
   },
   REQUEST_TIMEOUT: process.env.NODE_ENV === 'production' ? 45000 : 30000,
   //FILTER_TIMESTAMP: Math.floor((Date.now() - 5 * 60 * 1000) / 1000),
-  FILTER_TIMESTAMP: 1770249600,
+  FILTER_TIMESTAMP: 1770570437,
   TABLE_RELATIONSHIPS: {
     ORDER_PROD_MIX: {
       parentTable: 'ORDERS',
