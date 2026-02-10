@@ -17,6 +17,12 @@ const parseTimestamp = (value) => {
 };
 
 async function orderPreviewService(fastify) {
+  if (fastify.hasDecorator('orderPreviewRoutes')) {
+    return;
+  }
+
+  fastify.decorate('orderPreviewRoutes', true);
+
   fastify.get('/test/orders', async (request, reply) => {
     const { ENDPOINTS, FILTER_TIMESTAMP } = fastify.constants;
     const requestedTimestamp = parseTimestamp(request.query?.timestamp);
