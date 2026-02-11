@@ -735,7 +735,6 @@ class HubspotAdapter {
   }
 
   async createAssociationV3(fromObjectType, fromObjectId, toObjectType, toObjectId, associationCategory) {
-    // V3 API uses association categories instead of type IDs
     return this._makeRequest(
       'PUT',
       `/crm/v3/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}/${associationCategory}`
