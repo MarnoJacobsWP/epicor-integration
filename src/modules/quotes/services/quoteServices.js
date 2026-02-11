@@ -87,6 +87,10 @@ async function quoteService(fastify, _) {
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
+    if (HUBSPOT_ASSOCIATIONS.DEAL_TO_COMPANY == null) {
+      fastify.log.warn('Missing HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY for deal/company associations');
+      return { skipped: true };
+    }
     return await fastify.hubspotAdapter.ensureAssociation(
       'deals',
       dealId,

@@ -62,6 +62,22 @@ const extractHubspotErrorDetails = (responseData) => {
   return { errorMessage, errorDetails };
 };
 
+const normalizeAssociations = (associations = []) => {
+  if (!Array.isArray(associations) || associations.length === 0) return [];
+
+  const normalized = [];
+  for (const association of associations) {
+    if (!association?.to?.id) continue;
+    const types = Array.isArray(association.types)
+      ? association.types.filter((t) => t?.associationTypeId != null)
+      : [];
+    if (!types.length) continue;
+    normalized.push({ ...association, types });
+  }
+
+  return normalized;
+};
+
 class HubspotAdapter {
   constructor(httpClient, config, logger, constants) {
     this.client = httpClient;
@@ -531,8 +547,9 @@ class HubspotAdapter {
 
   async createDeal({ properties, associations = [] }) {
     const payload = { properties: normalizeProperties(properties) };
-    if (associations.length > 0) {
-      payload.associations = associations;
+    const normalizedAssociations = normalizeAssociations(associations);
+    if (normalizedAssociations.length > 0) {
+      payload.associations = normalizedAssociations;
     }
     const response = await this._makeRequest('POST', '/crm/v3/objects/deals', payload);
     return response.data;
@@ -547,8 +564,9 @@ class HubspotAdapter {
 
   async createLineItem({ properties, associations = [] }) {
     const payload = { properties: normalizeProperties(properties) };
-    if (associations.length > 0) {
-      payload.associations = associations;
+    const normalizedAssociations = normalizeAssociations(associations);
+    if (normalizedAssociations.length > 0) {
+      payload.associations = normalizedAssociations;
     }
     const response = await this._makeRequest('POST', '/crm/v3/objects/line_items', payload);
     return response.data;
@@ -634,6 +652,9 @@ class HubspotAdapter {
   }
 
   async createAssociation(fromObjectType, fromObjectId, toObjectType, toObjectId, associationTypeId) {
+    if (associationTypeId == null) {
+      throw new Error(`associationTypeId is required to associate ${fromObjectType} to ${toObjectType}`);
+    }
     const body = [
       {
         associationCategory: 'HUBSPOT_DEFINED',

@@ -74,6 +74,10 @@ async function orderService(fastify, _) {
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
+    if (HUBSPOT_ASSOCIATIONS.DEAL_TO_COMPANY == null) {
+      fastify.log.warn('Missing HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY for deal/company associations');
+      return { skipped: true };
+    }
     return await fastify.hubspotAdapter.ensureAssociation(
       'deals',
       dealId,
@@ -85,16 +89,21 @@ async function orderService(fastify, _) {
 
   async function updateMatchingQuote(quoteNum, orderNum, quoteDealId) {
     try {
-      await fastify.backoff(() =>
-        fastify.hubspotAdapter.updateDeal({
-          dealId: quoteDealId,
-          properties: {
-            pipeline: HUBSPOT_PIPELINES.QUOTES,
-            dealstage: HUBSPOT_DEAL_STAGES.CLOSED_WON
-          }
-        })
-      );
-      fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won (deal ${quoteDealId})`);
+      const properties = {};
+      if (HUBSPOT_PIPELINES.QUOTES) properties.pipeline = HUBSPOT_PIPELINES.QUOTES;
+      if (HUBSPOT_DEAL_STAGES.CLOSED_WON) properties.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
+
+      if (Object.keys(properties).length === 0) {
+        fastify.log.warn(`Skipping quote update for ${quoteNum}: missing HUBSPOT_PIPELINE_QUOTES or HUBSPOT_DEAL_STAGE_CLOSED_WON`);
+      } else {
+        await fastify.backoff(() =>
+          fastify.hubspotAdapter.updateDeal({
+            dealId: quoteDealId,
+            properties
+          })
+        );
+        fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won (deal ${quoteDealId})`);
+      }
       
       try {
         await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId);

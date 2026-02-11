@@ -165,6 +165,10 @@ async function orderProdMixService(fastify, _) {
         }
 
         // No match found — create new line item
+        if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL == null) {
+          throw new Error('Missing HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL for line item associations');
+        }
+
         const associations = dealId ? [{
           to: { id: dealId },
           types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL }]

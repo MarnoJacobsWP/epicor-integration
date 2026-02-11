@@ -32,7 +32,7 @@ export default fp(
           const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
 
           if (!isRetryableStatus(status)) {
-            const message = `Backoff aborted after non-retryable error: ${error.message}`;
+            const message = `Backoff aborted after non-retryable error: ${error.message}: ${error.response}: ${error.response?.data}: ${error.response?.data?.message}`;
             throw new Error(message, { cause: error });
           }
 
