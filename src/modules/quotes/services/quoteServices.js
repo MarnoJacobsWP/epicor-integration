@@ -7,9 +7,15 @@ const toMidnightUTC = (v) => {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 };
 
-const toSalesRepValue = (v) => {
+const toValidSalesRep = (v) => {
   if (!v) return 'Unknown Option';
-  return String(v).trim();
+  const validOptions = [
+    'House', 'Mike Kilcoyne and Associates', 'Phillips Contract Group, LLC', 'CYA',
+    'Reagan Penny', 'Dan Martin', 'Murphy Associates', 'Bruce Longhino Group',
+    'Morgan Associates', 'Mike Fabionar', 'Ginger Grant', 'Lauren East',
+    'Elizabeth Gerber', 'Jennifer Gates', 'John Parrish', 'Unknown Option'
+  ];
+  return validOptions.includes(v) ? v : 'Unknown Option';
 };
 
 const FIELD_MAPPINGS = [
@@ -22,7 +28,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'QuoteHed_Character08', hubspot: 'quotehed_character08' },
   { epicor: 'QuoteHed_ShortChar09', hubspot: 'quotehed_shortchar09' },
   { epicor: 'QuoteHed_Character10', hubspot: 'quotehed_character10' },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toSalesRepValue },
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toValidSalesRep },
   { epicor: 'QuoteHed_ShortChar01', hubspot: 'quotehed_shortchar01' },
   { epicor: 'QuoteHed_ShortChar02', hubspot: 'quotehed_shortchar02' },
   { epicor: 'QuoteHed_ShortChar03', hubspot: 'quotehed_shortchar03' },
@@ -177,14 +183,6 @@ async function quoteService(fastify, _) {
             delete props[key];
           }
         });
-
-        try {
-          if (props.salesrep_name) {
-            await fastify.hubspotAdapter.ensurePropertyOptions('deals', 'salesrep_name', [props.salesrep_name]);
-          }
-        } catch (optionError) {
-          fastify.log.warn(`Quote ${quoteNum} - Failed to ensure salesrep options: ${optionError.message}`);
-        }
 
         if (existRecord?.id || existRecord?.hubspotId) {
           const dealId = existRecord?.hubspotId || existRecord?.id;

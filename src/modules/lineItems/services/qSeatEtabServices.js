@@ -250,7 +250,6 @@ async function qSeatEtabService(fastify, _) {
     }
 
     fastify.log.info(`Found ${quoteRecords.length} QSeatEtab records, deduplicated to ${uniqueRecords.length} for quote ${quoteNum}`);
-    fastify.log.info(`${uniqueRecords}`)
 
     const results = {
       total: uniqueRecords.length,

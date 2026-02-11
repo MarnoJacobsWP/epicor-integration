@@ -1,13 +1,19 @@
 import fp from 'fastify-plugin';
 
-const toProdGrupValue = (v) => {
+const VALID_PRODGRUP_OPTIONS = [
+  'Discounted Products', 'E-Tables', 'EVO', 'Free Standing', 'Glass',
+  'New Casegoods, Training Tables', 'Panel Sales', 'Peds / Laterals',
+  'Power Beam', 'Seating', 'PET', 'Xpand', 'Unknown Option'
+];
+
+const toValidProdGrup = (v) => {
   if (!v) return 'Unknown Option';
-  return String(v).trim();
+  return VALID_PRODGRUP_OPTIONS.includes(v) ? v : 'Unknown Option';
 };
 
 const FIELD_MAPPINGS = [
   { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },
-   { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toProdGrupValue },
+  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_characterna', transform: toValidProdGrup },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
 ];
 
@@ -72,7 +78,6 @@ function extractHubspotErrorContext(error) {
 async function quoteProdMixService(fastify, _) {
   const { HUBSPOT_ASSOCIATIONS } = fastify.constants;
   let dealProdGrupPropertyCache = null;
-  let lineItemProdGrupPropertyCache = null;
 
   async function upsertLineItemRecord(data) {
     const query = { epicorId: String(data.epicorId) };
@@ -95,7 +100,7 @@ async function quoteProdMixService(fastify, _) {
   async function appendDealProdGrupValue(dealId, prodGrupValue) {
     if (!dealId || !prodGrupValue) return;
 
-     const propertyName = 'prodgrup_character01';
+    const propertyName = 'prodgrup_characterna';
     try {
       if (dealProdGrupPropertyCache === false) return;
       if (dealProdGrupPropertyCache === null) {
@@ -120,23 +125,10 @@ async function quoteProdMixService(fastify, _) {
           String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
         );
         if (!optionMatch?.value) {
-          await fastify.hubspotAdapter.ensurePropertyOptions('deals', propertyName, [normalizedValue]);
-          dealProdGrupPropertyCache = await fastify.hubspotAdapter.getObjectProperty('deals', propertyName);
-          const refreshedOptions = Array.isArray(dealProdGrupPropertyCache?.options)
-            ? dealProdGrupPropertyCache.options
-            : [];
-          const refreshedMatch = refreshedOptions.find(opt =>
-            String(opt?.label || '').trim().toLowerCase() === normalizedValue.toLowerCase() ||
-            String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
-          );
-          if (!refreshedMatch?.value) {
-            fastify.log.warn(`Deal ${dealId} - ${propertyName} unknown option "${normalizedValue}"; skipping update`);
-            return;
-          }
-          optionValue = refreshedMatch.value;
-        } else {
-          optionValue = optionMatch.value;
+          fastify.log.warn(`Deal ${dealId} - ${propertyName} unknown option "${normalizedValue}"; skipping update`);
+          return;
         }
+        optionValue = optionMatch.value;
       }
 
       const isMultiSelect = String(dealProdGrupPropertyCache.fieldType || '').toLowerCase() === 'checkbox';
@@ -172,62 +164,6 @@ async function quoteProdMixService(fastify, _) {
     }
   }
 
-  async function resolveLineItemProdGrupValue(prodGrupValue) {
-    if (!prodGrupValue) return prodGrupValue;
-
-    const propertyName = 'prodgrup_character01';
-    try {
-      if (lineItemProdGrupPropertyCache === false) return prodGrupValue;
-      if (lineItemProdGrupPropertyCache === null) {
-        lineItemProdGrupPropertyCache = await fastify.hubspotAdapter.getObjectProperty('line_items', propertyName);
-      }
-
-      if (!lineItemProdGrupPropertyCache) {
-        lineItemProdGrupPropertyCache = false;
-        fastify.log.warn(`Line item property ${propertyName} not found; skipping option check`);
-        return prodGrupValue;
-      }
-
-      const options = Array.isArray(lineItemProdGrupPropertyCache.options)
-        ? lineItemProdGrupPropertyCache.options
-        : [];
-
-      if (!options.length) return prodGrupValue;
-
-      const normalizedValue = String(prodGrupValue).trim();
-      if (!normalizedValue) return prodGrupValue;
-
-      const optionMatch = options.find(opt =>
-        String(opt?.label || '').trim().toLowerCase() === normalizedValue.toLowerCase() ||
-        String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
-      );
-
-      if (optionMatch?.value) return optionMatch.value;
-
-      await fastify.hubspotAdapter.ensurePropertyOptions('line_items', propertyName, [normalizedValue]);
-      lineItemProdGrupPropertyCache = await fastify.hubspotAdapter.getObjectProperty('line_items', propertyName);
-
-      const refreshedOptions = Array.isArray(lineItemProdGrupPropertyCache?.options)
-        ? lineItemProdGrupPropertyCache.options
-        : [];
-
-      const refreshedMatch = refreshedOptions.find(opt =>
-        String(opt?.label || '').trim().toLowerCase() === normalizedValue.toLowerCase() ||
-        String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
-      );
-
-      if (!refreshedMatch?.value) {
-        fastify.log.warn(`Line item ${propertyName} unknown option "${normalizedValue}"; using raw value`);
-        return normalizedValue;
-      }
-
-      return refreshedMatch.value;
-    } catch (error) {
-      fastify.log.warn(`Line item ${propertyName} option check failed: ${error.message}`);
-      return prodGrupValue;
-    }
-  }
-
   /**
    * Fetches existing HubSpot line items for a deal so we can compare properties
    * for dedup instead of relying on RowIdent (which changes each Epicor pull).
@@ -254,9 +190,7 @@ async function quoteProdMixService(fastify, _) {
 
       try {
         const props = transformEpicorToHubSpot(lineItem);
-        const resolvedProdGrup = await resolveLineItemProdGrupValue(props.prodgrup_character01);
-        if (resolvedProdGrup != null) props.prodgrup_character01 = resolvedProdGrup;
-        props.name = props.prodgrup_character01 || 'Unnamed Product';
+        props.name = props.prodgrup_characterna || 'Unnamed Product';
 
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {
@@ -326,7 +260,7 @@ async function quoteProdMixService(fastify, _) {
             results.updated++;
 
             if (dealId) {
-               await appendDealProdGrupValue(dealId, props.prodgrup_character01);
+              await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
             }
             continue;
           }
@@ -373,7 +307,7 @@ async function quoteProdMixService(fastify, _) {
         results.created++;
 
         if (dealId) {
-           await appendDealProdGrupValue(dealId, props.prodgrup_character01);
+          await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
         }
 
       } catch (error) {
@@ -402,8 +336,7 @@ async function quoteProdMixService(fastify, _) {
     }
 
     fastify.log.info(`Found ${quoteRecords.length} QuoteProdMix records, deduplicated to ${uniqueRecords.length} for quote ${quoteNum}`);
-    fastify.log.info(`${uniqueRecords}`)
-    
+
     const results = {
       total: uniqueRecords.length,
       created: 0,
@@ -423,7 +356,7 @@ async function quoteProdMixService(fastify, _) {
       updatedCount: results.updated,
       errorCount: results.errors,
       skippedCount: results.skipped,
-       prodgrupValues: [...new Set(uniqueRecords.map(r => toProdGrupValue(r.ProdGrup_Character01)).filter(Boolean))]
+      prodgrupValues: [...new Set(uniqueRecords.map(r => toValidProdGrup(r.ProdGrup_Character01)).filter(Boolean))]
     };
   }
 

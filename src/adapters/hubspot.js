@@ -734,55 +734,6 @@ class HubspotAdapter {
     }
   }
 
-  async updateObjectProperty(objectType, propertyName, payload) {
-    try {
-      const response = await this._makeRequest(
-        'PATCH',
-        `/crm/v3/properties/${objectType}/${propertyName}`,
-        payload
-      );
-      return response.data;
-    } catch (error) {
-      this.logger.warn(`Failed to update property ${propertyName} for ${objectType}: ${error.message}`);
-      return null;
-    }
-  }
-
-  async ensurePropertyOptions(objectType, propertyName, values = []) {
-    const normalized = Array.from(new Set(
-      values
-        .map((v) => (v == null ? '' : String(v).trim()))
-        .filter(Boolean)
-    ));
-
-    if (normalized.length === 0) return { updated: false };
-
-    const property = await this.getObjectProperty(objectType, propertyName);
-    if (!property || !Array.isArray(property.options)) {
-      return { updated: false };
-    }
-
-    const existingValues = new Set(
-      property.options
-        .map((opt) => String(opt?.value || '').trim().toLowerCase())
-        .filter(Boolean)
-    );
-
-    const toAdd = normalized
-      .filter((v) => !existingValues.has(String(v).toLowerCase()))
-      .map((v) => {
-        const trimmed = String(v).trim();
-        const safe = trimmed.substring(0, 100);
-        return { label: safe, value: safe };
-      });
-
-    if (toAdd.length === 0) return { updated: false };
-
-    const updatedOptions = [...property.options, ...toAdd];
-    const updated = await this.updateObjectProperty(objectType, propertyName, { options: updatedOptions });
-    return { updated: !!updated, added: toAdd.length };
-  }
-
   async createAssociationV3(fromObjectType, fromObjectId, toObjectType, toObjectId, associationCategory) {
     return this._makeRequest(
       'PUT',
