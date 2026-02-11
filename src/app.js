@@ -113,6 +113,7 @@ export default async function app(fastify, opts) {
         dir: join(import.meta.url, `modules/${module}`),
         dirNameRoutePrefix: false,
         indexPattern: /.*index(\.js|\.cjs)$/i,
+        maxDepth: 1,
         autohooks: false,
         options: { ...opts },
       });
