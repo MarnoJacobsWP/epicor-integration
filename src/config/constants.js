@@ -17,22 +17,16 @@ export const constants = {
     LINE_ITEMS: 'line_items',
   },
   HUBSPOT_PIPELINES: {
-    QUOTES: process.env.HUBSPOT_PIPELINE_QUOTES,
+    QUOTES: 'default',
   },
   HUBSPOT_DEAL_STAGES: {
-    QUOTE_CREATED: process.env.HUBSPOT_DEAL_STAGE_QUOTE_CREATED,
-    CLOSED_WON: process.env.HUBSPOT_DEAL_STAGE_CLOSED_WON,
+    QUOTE_CREATED: '2817003207',
+    CLOSED_WON: 'closedwon',
   },
   HUBSPOT_ASSOCIATIONS: {
-    COMPANY_TO_CONTACT: process.env.HUBSPOT_ASSOCIATION_COMPANY_TO_CONTACT
-      ? Number(process.env.HUBSPOT_ASSOCIATION_COMPANY_TO_CONTACT)
-      : undefined,
-    DEAL_TO_COMPANY: process.env.HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY
-      ? Number(process.env.HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY)
-      : undefined,
-    LINE_ITEM_TO_DEAL: process.env.HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL
-      ? Number(process.env.HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL)
-      : undefined,
+    COMPANY_TO_CONTACT: 2,
+    DEAL_TO_COMPANY: 5,
+    LINE_ITEM_TO_DEAL: 20,
   },
   PAGINATION: {
     TOP: process.env.NODE_ENV === 'production' ? 50000 : 100000,

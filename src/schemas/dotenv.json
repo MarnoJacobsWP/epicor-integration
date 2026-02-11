@@ -8,13 +8,7 @@
     "API_PASSWORD",
     "API_KEY",
     "HUBSPOT_ACCESS_TOKEN",
-    "MONGO_URI",
-    "HUBSPOT_PIPELINE_QUOTES",
-    "HUBSPOT_DEAL_STAGE_QUOTE_CREATED",
-    "HUBSPOT_DEAL_STAGE_CLOSED_WON",
-    "HUBSPOT_ASSOCIATION_COMPANY_TO_CONTACT",
-    "HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY",
-    "HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL"
+    "MONGO_URI"
   ],
   "properties": {
     "NODE_ENV": {
@@ -75,22 +69,28 @@
       "type": "integer"
     },
     "HUBSPOT_PIPELINE_QUOTES": {
-      "type": "string"
+      "type": "string",
+      "default": "default"
     },
     "HUBSPOT_DEAL_STAGE_QUOTE_CREATED": {
-      "type": "string"
+      "type": "string",
+      "default": "2817003207"
     },
     "HUBSPOT_DEAL_STAGE_CLOSED_WON": {
-      "type": "string"
+      "type": "string",
+      "default": "closedwon"
     },
     "HUBSPOT_ASSOCIATION_COMPANY_TO_CONTACT": {
-      "type": "integer"
+      "type": "integer",
+      "default": 2
     },
     "HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY": {
-      "type": "integer"
+      "type": "integer",
+      "default": 5
     },
     "HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL": {
-      "type": "integer"
+      "type": "integer",
+      "default": 20
     }
   }
 }
