@@ -66,6 +66,30 @@ function generateDealName(epicorQuote) {
   return `${jobName} - ${customerName}`;
 }
 
+function extractHubspotErrorContext(error) {
+  const chain = [];
+  let current = error;
+  while (current && chain.length < 5) {
+    chain.push(current);
+    current = current.cause;
+  }
+
+  let status;
+  let message;
+  for (const err of chain) {
+    if (status == null && err?.response?.status != null) status = err.response.status;
+    if (!message) {
+      message = err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.message
+        || message;
+    }
+  }
+
+  const combinedMessage = chain.map((err) => err?.message).filter(Boolean).join(' | ');
+  return { status, message, combinedMessage };
+}
+
 async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
@@ -162,6 +186,7 @@ async function quoteService(fastify, _) {
 
         if (existRecord?.id || existRecord?.hubspotId) {
           const dealId = existRecord?.hubspotId || existRecord?.id;
+          let needsCreate = false;
 
           try {
             const updateProps = { ...props };
@@ -173,12 +198,78 @@ async function quoteService(fastify, _) {
               fastify.hubspotAdapter.updateDeal({ dealId, properties: updateProps })
             );
           } catch (error) {
-            if (error?.response?.data?.message?.toLowerCase() === 'resource not found') {
+            const { status, message, combinedMessage } = extractHubspotErrorContext(error);
+            const combined = String(combinedMessage || '');
+            const notFound = status === 404
+              || String(message || '').toLowerCase().includes('resource not found')
+              || combined.toLowerCase().includes('resource not found')
+              || /\b404\b/.test(combined);
+            if (notFound) {
               await deleteDataBase(query);
-              fastify.log.warn(`Quote ${quoteNum} deleted from DB`);
+              fastify.log.warn(`Quote ${quoteNum} deleted from DB because HubSpot deal ${dealId} was not found`);
+              needsCreate = true;
             } else {
               throw error;
             }
+          }
+
+          if (needsCreate) {
+            if (!isWon && !props.dealstage) {
+              props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
+            }
+
+            const created = await fastify.backoff(() =>
+              fastify.hubspotAdapter.createDeal({ properties: props })
+            );
+            const newDealId = created.id;
+
+            fastify.log.info(`Quote ${quoteNum} recreated in HubSpot ${newDealId}`);
+
+            await createDataBase({
+              hubspotId: newDealId,
+              epicorId: quote.QuoteHed_SysRowID,
+              source: 'EpicorQuotes',
+              quoteNum: quoteNum,
+              action: 'create',
+              timestamp: new Date()
+            });
+
+            try {
+              await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, newDealId);
+            } catch (lineItemError) {
+              fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
+            }
+
+            try {
+              await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, newDealId);
+            } catch (lineItemError) {
+              fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
+            }
+
+            try {
+              const custNum = quote.QuoteHed_CustNum ? padCustNum(quote.QuoteHed_CustNum) : null;
+              fastify.log.info(`Quote ${quoteNum} CREATE - Raw CustNum: ${quote.QuoteHed_CustNum}, Padded: ${custNum}`);
+              if (custNum) {
+                const companySearch = await fastify.backoff(() =>
+                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+                );
+                fastify.log.info(`Quote ${quoteNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
+                if (companySearch.results?.[0]?.id) {
+                  fastify.log.info(`Quote ${quoteNum} CREATE - Attempting to associate deal ${newDealId} with company ${companySearch.results[0].id} using type 5`);
+                  const assocResult = await ensureDealCompanyAssociation(newDealId, companySearch.results[0].id);
+                  fastify.log.info(`Quote ${quoteNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
+                } else {
+                  fastify.log.warn(`Quote ${quoteNum} CREATE - No company found with customer_custnum=${custNum}`);
+                }
+              } else {
+                fastify.log.warn(`Quote ${quoteNum} CREATE - No custNum (QuoteHed_CustNum was empty)`);
+              }
+            } catch (associationError) {
+              fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
+            }
+
+            results.created++;
+            continue;
           }
 
           const action = isWon ? 'updated_to_closed_won' : 'updated';
