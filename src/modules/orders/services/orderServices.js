@@ -10,6 +10,7 @@ const toMidnightUTC = (v) => {
 const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_OrderNum', hubspot: 'orderhed_ordernum', transform: String },
   { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
+  { epicor: 'OrderHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
   { epicor: 'OrderDtl_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
   { epicor: 'OrderHed_OrderDate', hubspot: 'orderhed_orderdate', transform: toMidnightUTC },
   { epicor: 'OrderHed_CheckBox10', hubspot: 'orderhed_checkboxan', transform: Boolean },
@@ -200,6 +201,9 @@ async function orderService(fastify, _) {
 
         props = transformEpicorToHubSpot(order);
         props.dealname = generateDealName(order);
+        if (quoteNum) {
+          props.quotehed_quotenum_ = String(quoteNum);
+        }
         props.pipeline = HUBSPOT_PIPELINES.QUOTES;
         props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
 
