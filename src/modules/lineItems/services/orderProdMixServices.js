@@ -351,6 +351,7 @@ async function orderProdMixService(fastify, _) {
     }
 
     fastify.log.info(`Found ${records.length} OrderProdMix records, deduplicated to ${uniqueRecords.length} for order ${orderNum}`);
+    fastify.log.info(`${uniqueRecords}`)
 
     const results = {
       total: uniqueRecords.length,
