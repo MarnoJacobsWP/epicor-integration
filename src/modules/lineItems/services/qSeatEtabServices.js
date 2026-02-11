@@ -11,8 +11,9 @@ const FIELD_MAPPINGS = [
 /**
  * Properties used to determine if a line item already exists on a deal.
  * If ALL of these HubSpot properties match an existing line item, it is skipped.
+ * Order/quote numbers are intentionally ignored to dedupe across order/quote syncs.
  */
-const DEDUP_PROPERTIES = ['name', 'hs_sku', 'description', 'quantity', 'quotedtl_quotenum', 'prodgrup_description'];
+const DEDUP_PROPERTIES = ['name', 'quantity'];
 
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
