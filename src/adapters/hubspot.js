@@ -38,6 +38,17 @@ const computeRetryDelay = (attempt, retryAfterMs, baseDelayMs = 1000, maxDelayMs
   return Math.min(exponential + jitter, maxDelayMs);
 };
 
+const safeStringify = (value, maxLength = 4000) => {
+  if (value === undefined) return undefined;
+  try {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength)}...`;
+  } catch (error) {
+    return `[unserializable: ${error?.message || 'unknown error'}]`;
+  }
+};
+
 class HubspotAdapter {
   constructor(httpClient, config, logger, constants) {
     this.client = httpClient;
@@ -88,7 +99,16 @@ class HubspotAdapter {
 
         if (!isRetryableStatus(status) || attempt >= this.maxRetries) {
           const message = `HubSpot request failed: ${method.toUpperCase()} ${url} - ${status || 'unknown'} ${statusText}`;
+          const responseBody = safeStringify(error?.response?.data);
+          const requestBody = safeStringify(config?.data);
           this.logger.error(
+            {
+              status,
+              statusText,
+              correlationId,
+              responseBody,
+              requestBody,
+            },
             `${message}${correlationId ? ` (correlationId: ${correlationId})` : ''}`,
           );
           throw new Error(message, { cause: error });
