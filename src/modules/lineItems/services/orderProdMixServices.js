@@ -1,19 +1,13 @@
 import fp from 'fastify-plugin';
 
-const VALID_PRODGRUP_OPTIONS = [
-  'Discounted Products', 'E-Tables', 'EVO', 'Free Standing', 'Glass',
-  'New Casegoods, Training Tables', 'Panel Sales', 'Peds / Laterals',
-  'Power Beam', 'Seating', 'PET', 'Xpand', 'Unknown Option'
-];
-
-const toValidProdGrup = (v) => {
+const toProdGrupValue = (v) => {
   if (!v) return 'Unknown Option';
-  return VALID_PRODGRUP_OPTIONS.includes(v) ? v : 'Unknown Option';
+  return String(v).trim();
 };
 
 const FIELD_MAPPINGS = [
   { epicor: 'OrderDtl_OrderNum', hubspot: 'orderdtl_ordernum', transform: Number },
-  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_characterna', transform: toValidProdGrup },
+  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_characterna', transform: toProdGrupValue },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
 ];
 
@@ -125,10 +119,23 @@ async function orderProdMixService(fastify, _) {
           String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
         );
         if (!optionMatch?.value) {
-          fastify.log.warn(`Deal ${dealId} - ${propertyName} unknown option "${normalizedValue}"; skipping update`);
-          return;
+          await fastify.hubspotAdapter.ensurePropertyOptions('deals', propertyName, [normalizedValue]);
+          dealProdGrupPropertyCache = await fastify.hubspotAdapter.getObjectProperty('deals', propertyName);
+          const refreshedOptions = Array.isArray(dealProdGrupPropertyCache?.options)
+            ? dealProdGrupPropertyCache.options
+            : [];
+          const refreshedMatch = refreshedOptions.find(opt =>
+            String(opt?.label || '').trim().toLowerCase() === normalizedValue.toLowerCase() ||
+            String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
+          );
+          if (!refreshedMatch?.value) {
+            fastify.log.warn(`Deal ${dealId} - ${propertyName} unknown option "${normalizedValue}"; skipping update`);
+            return;
+          }
+          optionValue = refreshedMatch.value;
+        } else {
+          optionValue = optionMatch.value;
         }
-        optionValue = optionMatch.value;
       }
 
       const isMultiSelect = String(dealProdGrupPropertyCache.fieldType || '').toLowerCase() === 'checkbox';

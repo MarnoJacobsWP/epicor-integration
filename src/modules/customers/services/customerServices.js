@@ -1,19 +1,9 @@
 import fp from 'fastify-plugin';
 import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
 
-const VALID_SALESREP_OPTIONS = new Set([
-  'CYA', 'House', 'Murphy Associates', 'Mike Kilcoyne and Associates', 
-  'Reagan Penny', 'Phillips Contract Group, LLC', 'Dan Martin', 'Ginger Grant',
-  'Bruce Longhino Group', 'Mike Fabionar', 'Morgan Associates', 
-  'Heather Huddleston Interiors', 'Lauren East', 'Kevin Klieforth',
-  'Jennifer Gates', 'Bobbie Zimmer', 'Elizabeth Gerber', 
-  'Stephenson Toelkes Associates', 'John Parrish', 'Madison Mcsherry', 'Barry Holley', 'Unknown Option'
-]);
-
-const toValidSalesRep = (salesRepName) => {
+const toSalesRepValue = (salesRepName) => {
   if (!salesRepName?.trim()) return 'Unknown Option';
-  const cleanName = salesRepName.trim();
-  return VALID_SALESREP_OPTIONS.has(cleanName) ? cleanName : 'Unknown Option';
+  return salesRepName.trim();
 };
 
 const FIELD_MAPPINGS = [
@@ -26,8 +16,8 @@ const FIELD_MAPPINGS = [
   { epicor: 'Customer_City', hubspot: 'city', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
   { epicor: 'Customer_State', hubspot: 'hs_state_code', transform: (v) => v ? String(v).trim().substring(0, 50) : null },
   { epicor: 'Customer_Zip', hubspot: 'zip', transform: (v) => v ? String(v).trim().substring(0, 20) : null },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toValidSalesRep },
-  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: toValidSalesRep },
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toSalesRepValue },
+  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: toSalesRepValue },
   { epicor: 'CustGrup_GroupDesc', hubspot: 'custgrup_groupdesc', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
   { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
 ];
@@ -154,6 +144,24 @@ async function customerService(fastify, _) {
     if (batchData.length === 0) {
       fastify.log.warn(`No valid customer data for batch processing - ${failedCustomers.length} failed validation`);
       return results;
+    }
+
+    try {
+      const salesRepValues = batchData
+        .map((item) => item.properties?.salesrep_name)
+        .filter(Boolean);
+      const salesRep1Values = batchData
+        .map((item) => item.properties?.salesrepa_name)
+        .filter(Boolean);
+
+      if (salesRepValues.length) {
+        await fastify.hubspotAdapter.ensurePropertyOptions('companies', 'salesrep_name', salesRepValues);
+      }
+      if (salesRep1Values.length) {
+        await fastify.hubspotAdapter.ensurePropertyOptions('companies', 'salesrepa_name', salesRep1Values);
+      }
+    } catch (optionError) {
+      fastify.log.warn(`Failed to ensure company salesrep options: ${optionError.message}`);
     }
 
     fastify.log.info(`Prepared ${batchData.length} companies for batch upsert, ${failedCustomers.length} failed validation`);
