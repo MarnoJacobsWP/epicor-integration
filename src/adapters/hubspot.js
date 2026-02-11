@@ -49,6 +49,19 @@ const safeStringify = (value, maxLength = 4000) => {
   }
 };
 
+const extractHubspotErrorDetails = (responseData) => {
+  if (!responseData || typeof responseData !== 'object') {
+    return { errorMessage: undefined, errorDetails: undefined };
+  }
+
+  const errorMessage = responseData.message || responseData.error || responseData.status || undefined;
+  const errorDetails = Array.isArray(responseData.errors)
+    ? responseData.errors.map((item) => item?.message || item?.reason || safeStringify(item)).filter(Boolean)
+    : undefined;
+
+  return { errorMessage, errorDetails };
+};
+
 class HubspotAdapter {
   constructor(httpClient, config, logger, constants) {
     this.client = httpClient;
@@ -98,8 +111,10 @@ class HubspotAdapter {
         const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
 
         if (!isRetryableStatus(status) || attempt >= this.maxRetries) {
-          const message = `HubSpot request failed: ${method.toUpperCase()} ${url} - ${status || 'unknown'} ${statusText}`;
           const responseBody = safeStringify(error?.response?.data);
+          const { errorMessage, errorDetails } = extractHubspotErrorDetails(error?.response?.data);
+          const messageSuffix = errorMessage ? ` - ${errorMessage}` : '';
+          const message = `HubSpot request failed: ${method.toUpperCase()} ${url} - ${status || 'unknown'} ${statusText}${messageSuffix}`;
           const requestBody = safeStringify(config?.data);
           this.logger.error(
             {
@@ -107,6 +122,8 @@ class HubspotAdapter {
               statusText,
               correlationId,
               responseBody,
+              errorMessage,
+              errorDetails,
               requestBody,
             },
             `${message}${correlationId ? ` (correlationId: ${correlationId})` : ''}`,
