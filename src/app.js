@@ -104,19 +104,13 @@ export default async function app(fastify, opts) {
       'system'
     ];
 
-    for (const module of modules) {
-      if (fastify[`${module}Task`] || fastify[`${module}Service`]) {
-        fastify.log.debug(`Module ${module} already loaded, skipping...`);
+    for (const moduleName of modules) {
+      if (fastify[`${moduleName}Task`] || fastify[`${moduleName}Service`]) {
+        fastify.log.debug(`Module ${moduleName} already loaded, skipping...`);
         continue;
       }
-      await fastify.register(AutoLoad, {
-        dir: join(import.meta.url, `modules/${module}`),
-        dirNameRoutePrefix: false,
-        indexPattern: /.*index(\.js|\.cjs)$/i,
-        maxDepth: 1,
-        autohooks: false,
-        options: { ...opts },
-      });
+      const { default: modulePlugin } = await import(`./modules/${moduleName}/index.js`);
+      await fastify.register(modulePlugin, { ...opts });
     }
 
     fastify.log.info('Epicor Integration API initialized successfully');
