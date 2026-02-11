@@ -51,6 +51,30 @@ function findMatchingLineItem(existingLineItems, candidateProps) {
   }) || null;
 }
 
+function extractHubspotErrorContext(error) {
+  const chain = [];
+  let current = error;
+  while (current && chain.length < 5) {
+    chain.push(current);
+    current = current.cause;
+  }
+
+  let status;
+  let message;
+  for (const err of chain) {
+    if (status == null && err?.response?.status != null) status = err.response.status;
+    if (!message) {
+      message = err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.message
+        || message;
+    }
+  }
+
+  const combinedMessage = chain.map((err) => err?.message).filter(Boolean).join(' | ');
+  return { status, message, combinedMessage };
+}
+
 async function orderProdMixService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   let dealProdGrupPropertyCache = null;
@@ -188,37 +212,58 @@ async function orderProdMixService(fastify, _) {
 
         if (existingRecord?.hubspotId) {
           const lineItemId = existingRecord.hubspotId;
-          await fastify.backoff(() =>
-            fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
-          );
+          let needsCreate = false;
 
-          if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
-            await fastify.hubspotAdapter.ensureAssociation(
-              'line_items',
-              lineItemId,
-              'deals',
-              dealId,
-              HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+          try {
+            await fastify.backoff(() =>
+              fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
             );
-          }
+          } catch (error) {
+            const { status, message, combinedMessage } = extractHubspotErrorContext(error);
+            const combined = String(combinedMessage || '');
+            const notFound = status === 404
+              || String(message || '').toLowerCase().includes('resource not found')
+              || combined.toLowerCase().includes('resource not found')
+              || /\b404\b/.test(combined);
 
-          await fastify.lineItemRepository.updateDatabase(
-            { epicorId: String(epicorId) },
-            {
-              hubspotId: lineItemId,
-              source: 'EpicorOrderProdMix',
-              orderNum,
-              action: 'update',
+            if (notFound) {
+              await fastify.lineItemRepository.deleteDatabase({ epicorId: String(epicorId) });
+              fastify.log.warn(`OrderProdMix line item ${lineItemId} not found; recreating for order ${orderNum}`);
+              needsCreate = true;
+            } else {
+              throw error;
             }
-          );
-
-          existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
-          results.updated++;
-
-          if (dealId) {
-            await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
           }
-          continue;
+
+          if (!needsCreate) {
+            if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+              await fastify.hubspotAdapter.ensureAssociation(
+                'line_items',
+                lineItemId,
+                'deals',
+                dealId,
+                HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+              );
+            }
+
+            await fastify.lineItemRepository.updateDatabase(
+              { epicorId: String(epicorId) },
+              {
+                hubspotId: lineItemId,
+                source: 'EpicorOrderProdMix',
+                orderNum,
+                action: 'update',
+              }
+            );
+
+            existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
+            results.updated++;
+
+            if (dealId) {
+              await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
+            }
+            continue;
+          }
         }
 
         // No match found — create new line item
@@ -235,6 +280,16 @@ async function orderProdMixService(fastify, _) {
           fastify.hubspotAdapter.createLineItem({ properties: cleanProps, associations })
         );
         const lineItemId = created.id;
+
+        if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+          await fastify.hubspotAdapter.ensureAssociation(
+            'line_items',
+            lineItemId,
+            'deals',
+            dealId,
+            HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+          );
+        }
 
         const resolvedEpicorId = epicorId || getEpicorId(lineItem, orderNum, lineItemId);
 

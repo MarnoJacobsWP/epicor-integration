@@ -42,6 +42,30 @@ function findMatchingLineItem(existingLineItems, candidateProps) {
   }) || null;
 }
 
+function extractHubspotErrorContext(error) {
+  const chain = [];
+  let current = error;
+  while (current && chain.length < 5) {
+    chain.push(current);
+    current = current.cause;
+  }
+
+  let status;
+  let message;
+  for (const err of chain) {
+    if (status == null && err?.response?.status != null) status = err.response.status;
+    if (!message) {
+      message = err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.message
+        || message;
+    }
+  }
+
+  const combinedMessage = chain.map((err) => err?.message).filter(Boolean).join(' | ');
+  return { status, message, combinedMessage };
+}
+
 async function qSeatEtabService(fastify, _) {
   const { HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
@@ -93,6 +117,67 @@ async function qSeatEtabService(fastify, _) {
           continue;
         }
 
+        const epicorId = lineItem.SysRowID
+          || lineItem.QuoteDtl_SysRowID
+          || `${quoteNum}|${lineItem.QuoteDtl_PartNum || ''}|${lineItem.QuoteDtl_LineDesc || ''}|${lineItem.QuoteDtl_OrderQty || ''}`
+          || null;
+
+        const existingRecord = epicorId
+          ? await fastify.lineItemRepository.findByQuery({ epicorId: String(epicorId) })
+          : null;
+
+        if (existingRecord?.hubspotId) {
+          const lineItemId = existingRecord.hubspotId;
+          let needsCreate = false;
+
+          try {
+            await fastify.backoff(() =>
+              fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
+            );
+          } catch (error) {
+            const { status, message, combinedMessage } = extractHubspotErrorContext(error);
+            const combined = String(combinedMessage || '');
+            const notFound = status === 404
+              || String(message || '').toLowerCase().includes('resource not found')
+              || combined.toLowerCase().includes('resource not found')
+              || /\b404\b/.test(combined);
+
+            if (notFound) {
+              await fastify.lineItemRepository.deleteDatabase({ epicorId: String(epicorId) });
+              fastify.log.warn(`QSeatEtab line item ${lineItemId} not found; recreating for quote ${quoteNum}`);
+              needsCreate = true;
+            } else {
+              throw error;
+            }
+          }
+
+          if (!needsCreate) {
+            if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+              await fastify.hubspotAdapter.ensureAssociation(
+                'line_items',
+                lineItemId,
+                'deals',
+                dealId,
+                HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+              );
+            }
+
+            await fastify.lineItemRepository.updateDatabase(
+              { epicorId: String(epicorId) },
+              {
+                hubspotId: lineItemId,
+                source: 'EpicorQSeatEtab',
+                quoteNum,
+                action: 'update',
+              }
+            );
+
+            existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
+            results.updated++;
+            continue;
+          }
+        }
+
         // No match found — create new line item
         if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL == null) {
           throw new Error('Missing HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL for line item associations');
@@ -108,13 +193,20 @@ async function qSeatEtabService(fastify, _) {
         );
         const lineItemId = created.id;
 
-        const epicorId = lineItem.SysRowID
-          || lineItem.QuoteDtl_SysRowID
-          || `${quoteNum}|${lineItem.QuoteDtl_PartNum || ''}|${lineItem.QuoteDtl_LineDesc || ''}|${lineItem.QuoteDtl_OrderQty || ''}`
-          || lineItemId;
+        if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+          await fastify.hubspotAdapter.ensureAssociation(
+            'line_items',
+            lineItemId,
+            'deals',
+            dealId,
+            HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+          );
+        }
+
+        const resolvedEpicorId = epicorId || lineItemId;
 
         await createDataBase({
-          epicorId: String(epicorId),
+          epicorId: String(resolvedEpicorId),
           hubspotId: lineItemId,
           source: 'EpicorQSeatEtab',
           quoteNum,
