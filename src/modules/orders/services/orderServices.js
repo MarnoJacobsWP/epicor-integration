@@ -103,7 +103,7 @@ async function orderService(fastify, _) {
         fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
       }
     } catch (quoteUpdateError) {
-      fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
+      fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}: ${quoteUpdateError.response}: ${quoteUpdateError.response?.data}: ${quoteUpdateError.response?.data?.message}`);
     }
   }
 
