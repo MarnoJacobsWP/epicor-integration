@@ -17,19 +17,31 @@ export const constants = {
     LINE_ITEMS: 'line_items',
   },
   HUBSPOT_PIPELINES: {
-    QUOTES: 'default',
+    QUOTES: process.env.HUBSPOT_PIPELINE_QUOTES,
   },
   HUBSPOT_DEAL_STAGES: {
-    QUOTE_CREATED: '2817003207',
-    CLOSED_WON: 'closedwon',
+    QUOTE_CREATED: process.env.HUBSPOT_DEAL_STAGE_QUOTE_CREATED,
+    CLOSED_WON: process.env.HUBSPOT_DEAL_STAGE_CLOSED_WON,
+  },
+  HUBSPOT_ASSOCIATIONS: {
+    COMPANY_TO_CONTACT: process.env.HUBSPOT_ASSOCIATION_COMPANY_TO_CONTACT
+      ? Number(process.env.HUBSPOT_ASSOCIATION_COMPANY_TO_CONTACT)
+      : undefined,
+    DEAL_TO_COMPANY: process.env.HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY
+      ? Number(process.env.HUBSPOT_ASSOCIATION_DEAL_TO_COMPANY)
+      : undefined,
+    LINE_ITEM_TO_DEAL: process.env.HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL
+      ? Number(process.env.HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL)
+      : undefined,
   },
   PAGINATION: {
     TOP: process.env.NODE_ENV === 'production' ? 50000 : 100000,
     INITIAL_SKIP: 0,
   },
   REQUEST_TIMEOUT: process.env.NODE_ENV === 'production' ? 45000 : 30000,
-  //FILTER_TIMESTAMP: Math.floor((Date.now() - 5 * 60 * 1000) / 1000),
-  FILTER_TIMESTAMP: 1770570437,
+  FILTER_TIMESTAMP: process.env.FILTER_TIMESTAMP
+    ? Number(process.env.FILTER_TIMESTAMP)
+    : Math.floor((Date.now() - 5 * 60 * 1000) / 1000),
   TABLE_RELATIONSHIPS: {
     ORDER_PROD_MIX: {
       parentTable: 'ORDERS',
@@ -75,6 +87,7 @@ export const {
   HUBSPOT_OBJECTS,
   HUBSPOT_PIPELINES,
   HUBSPOT_DEAL_STAGES,
+  HUBSPOT_ASSOCIATIONS,
   PAGINATION,
   REQUEST_TIMEOUT,
   FILTER_TIMESTAMP,

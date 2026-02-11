@@ -13,7 +13,7 @@ async function dbHealth(fastify, opts) {
       await fastify.mongo.db.command({ ping: 1 });
       fastify.log.info('MongoDB health check passed');
     } catch (error) {
-      fastify.log.error('MongoDB health check failed:', error.message);
+      fastify.log.error(`MongoDB health check failed: ${error.message}`);
       // Avoid terminating the process for health check failures.
     }
   });
@@ -25,7 +25,7 @@ async function dbHealth(fastify, opts) {
     });
     
     fastify.mongo.client.on('serverHeartbeatFailed', (event) => {
-      fastify.log.error('MongoDB heartbeat failed:', event);
+      fastify.log.error(`MongoDB heartbeat failed: ${event?.reason || 'unknown'}`);
     });
     
     fastify.mongo.client.on('connectionPoolCreated', (event) => {
@@ -44,7 +44,7 @@ async function dbHealth(fastify, opts) {
         await fastify.mongo.db.command({ ping: 1 });
       }
     } catch (error) {
-      fastify.log.error('Periodic MongoDB health check failed:', error.message);
+      fastify.log.error(`Periodic MongoDB health check failed: ${error.message}`);
     }
   }, 5 * 60 * 1000);
   

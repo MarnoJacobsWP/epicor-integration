@@ -22,11 +22,11 @@ export default fp(
     // Add request interceptor for logging
     httpClient.interceptors.request.use(
       (config) => {
-        fastify.log.debug(`HTTP Request: ${config.method?.toUpperCase()} ${config.url}`);
+        fastify.log.debug(`HTTP request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
       },
       (error) => {
-        fastify.log.error('HTTP Request Error:', error.message);
+        fastify.log.error(`HTTP request error: ${error.message}`);
         return Promise.reject(error);
       }
     );
@@ -34,21 +34,13 @@ export default fp(
     // Add response interceptor for logging
     httpClient.interceptors.response.use(
       (response) => {
-        fastify.log.debug(`HTTP Response: ${response.status} ${response.config.url}`);
+        fastify.log.debug(`HTTP response: ${response.status} ${response.config.url}`);
         return response;
       },
       (error) => {
-        fastify.log.error('HTTP Response Error:', {
-          url: error.config?.url,
-          method: error.config?.method,
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          message: error.message,
-          responseData: error.response?.data,
-          hubspotError: error.response?.data?.message,
-          hubspotCategory: error.response?.data?.category,
-          validationResults: error.response?.data?.validationResults
-        });
+        fastify.log.error(
+          `HTTP response error: ${error.config?.method?.toUpperCase() || 'UNKNOWN'} ${error.config?.url || 'unknown'} - ${error.response?.status || 'unknown'} ${error.response?.statusText || ''} - ${error.message}`,
+        );
         return Promise.reject(error);
       }
     );

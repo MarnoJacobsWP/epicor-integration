@@ -47,7 +47,7 @@ function transformEpicorToHubSpot(epicorCustomer) {
 }
 
 async function customerService(fastify, _) {
-  const { ENDPOINTS, BATCH_SIZES } = fastify.constants;
+  const { ENDPOINTS, BATCH_SIZES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const BATCH_SIZE = BATCH_SIZES.CUSTOMERS || 100;
   const UNIQUE_PROPERTY = 'customer_custid_';
 
@@ -152,9 +152,7 @@ async function customerService(fastify, _) {
     }
 
     if (batchData.length === 0) {
-      fastify.log.warn('No valid customer data for batch processing', {
-        failedCustomers: failedCustomers.slice(0, 5)
-      });
+      fastify.log.warn(`No valid customer data for batch processing - ${failedCustomers.length} failed validation`);
       return results;
     }
 
@@ -216,7 +214,7 @@ async function customerService(fastify, _) {
                         result.id,
                         'contacts',
                         contact.id,
-                        2
+                        HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
                       );
                     }
                     fastify.log.info(`Associated company ${result.id} with ${contactSearch.results.length} contact(s)`);
@@ -245,9 +243,7 @@ async function customerService(fastify, _) {
       fastify.log.info(`Batch processed: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
 
     } catch (error) {
-      fastify.log.error(`Batch upsert failed: ${error.message}`, {
-        response: error.response?.data
-      });
+      fastify.log.error(`Batch upsert failed: ${error.message} [${error.response?.status || 'no-status'}]`);
       
       results.errors = batchData.length;
       results.errorDetails.push({
@@ -358,7 +354,7 @@ async function customerService(fastify, _) {
                     companyId,
                     'contacts',
                     contact.id,
-                    2
+                    HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
                   );
                 }
                 fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
@@ -396,7 +392,7 @@ async function customerService(fastify, _) {
                     companyId,
                     'contacts',
                     contact.id,
-                    2
+                    HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
                   );
                 }
                 fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);

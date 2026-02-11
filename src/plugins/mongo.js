@@ -41,7 +41,7 @@ const mongoDBConfiguration = async (fastify, opts) => {
       
       fastify.log.debug('MongoDB indexes created');
     } catch (indexError) {
-      fastify.log.warn('Could not create MongoDB indexes:', indexError.message);
+      fastify.log.warn(`Could not create MongoDB indexes: ${indexError.message}`);
     }
     
   } catch (error) {

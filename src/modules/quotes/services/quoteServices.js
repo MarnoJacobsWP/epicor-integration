@@ -45,7 +45,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'QuoteHed_Character03', hubspot: 'quotehed_character03' },
   { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
   { epicor: 'Task_TaskComment', hubspot: 'task_taskcomment' },
-  { epicor: 'RowIdent', hubspot: 'rowident' },
+  { epicor: 'QuoteHed_SysRowID', hubspot: 'rowident' },
 ];
 
 function transformEpicorToHubSpot(epicorQuote) {
@@ -67,7 +67,7 @@ function generateDealName(epicorQuote) {
 }
 
 async function quoteService(fastify, _) {
-  const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES } = fastify.constants;
+  const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
   async function infoRecord(data) {
     return await fastify.quoteRepository.findByIdProperty(data);
@@ -92,7 +92,7 @@ async function quoteService(fastify, _) {
       dealId,
       'companies',
       companyId,
-      5
+      HUBSPOT_ASSOCIATIONS.DEAL_TO_COMPANY
     );
   }
 
@@ -105,7 +105,7 @@ async function quoteService(fastify, _) {
 
       try {
         const query = {
-          epicorId: quote.RowIdent,
+          epicorId: quote.QuoteHed_SysRowID,
           source: 'EpicorQuotes',
         };
 
@@ -119,14 +119,7 @@ async function quoteService(fastify, _) {
             existRecord = searchData.results?.[0] || null;
             fastify.log.info(`Search completed for quote ${quoteNum}: ${existRecord ? 'Found existing deal ' + existRecord.id : 'No existing deal found'}`);
           } catch (searchError) {
-            fastify.log.error({
-              quoteNum,
-              searchErrorMessage: searchError.message,
-              status: searchError.response?.status,
-              statusText: searchError.response?.statusText,
-              hubspotError: JSON.stringify(searchError.response?.data),
-              validationResults: JSON.stringify(searchError.response?.data?.validationResults)
-            }, `Search failed for quote ${quoteNum}`);
+            fastify.log.error(`Search failed for quote ${quoteNum}: ${searchError.message} [${searchError.response?.status || 'no-status'}]`);
             existRecord = null;
           }
         }
@@ -192,7 +185,7 @@ async function quoteService(fastify, _) {
           } else {
             await createDataBase({
               hubspotId: dealId,
-              epicorId: quote.RowIdent,
+              epicorId: quote.QuoteHed_SysRowID,
               source: 'EpicorQuotes',
               quoteNum: quoteNum,
               action: 'create',
@@ -231,7 +224,7 @@ async function quoteService(fastify, _) {
               fastify.log.warn(`Quote ${quoteNum} UPDATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
+            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
           }
 
           results.updated++;
@@ -245,7 +238,7 @@ async function quoteService(fastify, _) {
 
           await createDataBase({
             hubspotId: dealId,
-            epicorId: quote.RowIdent,
+              epicorId: quote.QuoteHed_SysRowID,
             source: 'EpicorQuotes',
             quoteNum: quoteNum,
             action: 'create',
@@ -283,24 +276,14 @@ async function quoteService(fastify, _) {
               fastify.log.warn(`Quote ${quoteNum} CREATE - No custNum (QuoteHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
+            fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
           }
 
           results.created++;
         }
 
       } catch (error) {
-        fastify.log.error({
-          quoteNum,
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          hubspotError: JSON.stringify(error.response?.data),
-          hubspotMessage: error.response?.data?.message,
-          category: error.response?.data?.category,
-          validationResults: JSON.stringify(error.response?.data?.validationResults),
-          errors: JSON.stringify(error.response?.data?.errors),
-          stack: error.stack
-        }, `Individual quote ${quoteNum} failed: ${error.message}`);
+        fastify.log.error(`Individual quote ${quoteNum} failed: ${error.message} [${error.response?.status || 'no-status'}]`);
         results.errors++;
       }
     }
@@ -328,7 +311,6 @@ async function quoteService(fastify, _) {
 
       const uniqueRecords = Array.from(quoteMap.values());
       fastify.log.info(`Fetched ${records.length} quotes, deduplicated to ${uniqueRecords.length}, starting individual sync...`);
-      fastify.log.info(uniqueRecords)
       
       const results = {
         total: uniqueRecords.length,

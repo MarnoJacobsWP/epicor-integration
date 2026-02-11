@@ -2,7 +2,6 @@ import AutoLoad from '@fastify/autoload';
 import Sensible from '@fastify/sensible';
 import UnderPressure from '@fastify/under-pressure';
 import { join } from 'desm';
-import os from 'node:os';
 import * as utils from './utils/dateHelper.js';
 
 export const options = {
@@ -101,7 +100,8 @@ export default async function app(fastify, opts) {
       'lineItems',
       'orders',
       'quotes',
-      'sync'
+      'sync',
+      'system'
     ];
 
     for (const module of modules) {
@@ -118,96 +118,9 @@ export default async function app(fastify, opts) {
       });
     }
 
-    fastify.get('/health', async (request, reply) => {
-      const checks = {
-        server: 'healthy',
-        timestamp: new Date().toISOString(),
-        services: {}
-      };
-
-      // Check MongoDB
-      try {
-        if (fastify.mongo) {
-          await fastify.mongo.db.command({ ping: 1 });
-          checks.services.mongo = 'connected';
-        } else {
-          checks.services.mongo = 'not_configured';
-        }
-      } catch (error) {
-        checks.services.mongo = 'disconnected';
-      }
-
-      // Check HubSpot
-      checks.services.hubspot = fastify.hubspotAdapter ? 'connected' : 'disconnected';
-
-      // Check Epicor
-      checks.services.epicor = fastify.epicorAdapter ? 'connected' : 'disconnected';
-
-      // Check memory usage
-      const used = process.memoryUsage();
-      checks.memory = {
-        rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
-        heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
-        heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
-        external: `${Math.round(used.external / 1024 / 1024)}MB`,
-      };
-
-      // Check uptime
-      checks.uptime = `${Math.floor(process.uptime())}s`;
-
-      // Determine overall health
-      const allHealthy = Object.values(checks.services).every(
-        status => status === 'connected' || status === 'not_configured'
-      );
-      
-      checks.status = allHealthy ? 'healthy' : 'degraded';
-      checks.code = allHealthy ? 200 : 503;
-
-      return reply.code(checks.code).send(checks);
-    });
-
-    // Root endpoint
-    fastify.get('/', async (request, reply) => {
-      return {
-        status: 'OK',
-        service: 'Epicor to HubSpot Integration',
-        version: '1.0.0',
-        environment: process.env.NODE_ENV,
-        timestamp: new Date().toISOString(),
-        endpoints: {
-          health: '/health',
-          syncStatus: '/sync/status',
-          syncContacts: 'POST /syncContacts',
-          syncCustomers: 'POST /syncCustomers',
-          syncOrders: 'POST /syncOrders',
-          syncQuotes: 'POST /syncQuotes',
-          fullSync: 'POST /sync/all'
-        }
-      };
-    });
-
-    // Metrics endpoint for monitoring
-    fastify.get('/metrics', async (request, reply) => {
-      const metrics = {
-        timestamp: new Date().toISOString(),
-        nodejs: {
-          version: process.version,
-          memory: process.memoryUsage(),
-          uptime: process.uptime(),
-        },
-        os: {
-          platform: process.platform,
-          arch: process.arch,
-          cpus: os.cpus().length,
-        }
-      };
-      return metrics;
-    });
-
     fastify.log.info('Epicor Integration API initialized successfully');
   } catch (error) {
     fastify.log.error(`Error initializing application: ${error.message}`);
-    console.error('Initialization error:', error);
     throw error;
   }
 }

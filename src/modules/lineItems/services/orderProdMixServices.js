@@ -15,8 +15,13 @@ const FIELD_MAPPINGS = [
   { epicor: 'OrderDtl_OrderNum', hubspot: 'orderdtl_ordernum', transform: Number },
   { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_characterna', transform: toValidProdGrup },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
-  { epicor: 'RowIdent', hubspot: 'rowident_' },
 ];
+
+/**
+ * Properties used to determine if a line item already exists on a deal.
+ * If ALL of these HubSpot properties match an existing line item, it is skipped.
+ */
+const DEDUP_PROPERTIES = ['name', 'price', 'orderdtl_ordernum', 'prodgrup_characterna'];
 
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
@@ -30,25 +35,27 @@ function transformEpicorToHubSpot(epicorRecord) {
   return result;
 }
 
+/**
+ * Checks whether a set of properties matches any existing HubSpot line item.
+ * Returns the matching HubSpot line item or null.
+ */
+function findMatchingLineItem(existingLineItems, candidateProps) {
+  return existingLineItems.find((existing) => {
+    const hsProps = existing.properties || {};
+    return DEDUP_PROPERTIES.every((key) => {
+      const candidateVal = String(candidateProps[key] ?? '').trim();
+      const existingVal = String(hsProps[key] ?? '').trim();
+      return candidateVal === existingVal;
+    });
+  }) || null;
+}
+
 async function orderProdMixService(fastify, _) {
-  const { ENDPOINTS } = fastify.constants;
-  const UNIQUE_PROPERTY = 'rowident_';
+  const { ENDPOINTS, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   let dealProdGrupPropertyCache = null;
-
-  async function infoRecord(data) {
-    return await fastify.lineItemRepository.findByIdProperty(data);
-  }
-
-  async function updateDataBase(filter, data) {
-    return await fastify.lineItemRepository.updateDatabase(filter, data);
-  }
 
   async function createDataBase(data) {
     return await fastify.lineItemRepository.insertDatabase(data);
-  }
-
-  async function deleteDataBase(filter) {
-    return await fastify.lineItemRepository.deleteDatabase(filter);
   }
 
   async function appendDealProdGrupValue(dealId, prodGrupValue) {
@@ -61,7 +68,7 @@ async function orderProdMixService(fastify, _) {
       }
 
       if (!dealProdGrupPropertyCache) {
-        fastify.log.warn(`${dealId} - ${propertyName} - Property not found on deals; skipping update`);
+        fastify.log.warn(`Deal ${dealId} - ${propertyName} property not found on deals; skipping update`);
         return;
       }
 
@@ -77,7 +84,7 @@ async function orderProdMixService(fastify, _) {
           String(opt?.value || '').trim().toLowerCase() === normalizedValue.toLowerCase()
         );
         if (!optionMatch?.value) {
-          fastify.log.warn(`${dealId} - ${propertyName} - Unknown option "${normalizedValue}"; skipping update`);
+          fastify.log.warn(`Deal ${dealId} - ${propertyName} unknown option "${normalizedValue}"; skipping update`);
           return;
         }
         optionValue = optionMatch.value;
@@ -112,166 +119,112 @@ async function orderProdMixService(fastify, _) {
         );
       }
     } catch (error) {
-      const errorData = error.response?.data ? JSON.stringify(error.response.data) : 'no_error_data';
-      fastify.log.warn(`${dealId} - ${propertyName} - ${prodGrupValue} - ${errorData} - Failed to append prod group value to deal ${dealId}: ${error.message}`);
+      fastify.log.warn(`Deal ${dealId} - Failed to append prodgrup value "${prodGrupValue}": ${error.message}`);
+    }
+  }
+
+  /**
+   * Fetches existing HubSpot line items for a deal so we can compare properties
+   * for dedup instead of relying on RowIdent (which changes each Epicor pull).
+   */
+  async function fetchExistingLineItems(dealId) {
+    try {
+      return await fastify.backoff(() =>
+        fastify.hubspotAdapter.getLineItemsForDeal(dealId, DEDUP_PROPERTIES)
+      );
+    } catch (error) {
+      fastify.log.warn(`Failed to fetch existing line items for deal ${dealId}: ${error.message}`);
+      return [];
     }
   }
 
   async function processLineItemsIndividually(lineItems, dealId, results) {
-    fastify.log.info(`Starting individual processing for ${lineItems.length} line items...`);
-    
+    fastify.log.info(`Processing ${lineItems.length} OrderProdMix line items for deal ${dealId}`);
+
+    const existingLineItems = dealId ? await fetchExistingLineItems(dealId) : [];
+    fastify.log.info(`Found ${existingLineItems.length} existing line items on deal ${dealId}`);
+
     for (const lineItem of lineItems) {
-      const rowident = lineItem.RowIdent;
+      const orderNum = lineItem.OrderDtl_OrderNum;
 
       try {
         const props = transformEpicorToHubSpot(lineItem);
         props.name = props.prodgrup_characterna || 'Unnamed Product';
 
-        const cleanProps = {
-          name: props.name,
-          price: props.price,
-          rowident_: props.rowident_,
-          prodgrup_characterna: props.prodgrup_characterna
-        };
-
-        Object.keys(cleanProps).forEach(key => {
-          if (cleanProps[key] === null || cleanProps[key] === undefined) {
-            delete cleanProps[key];
-          }
-        });
-
-        const query = {
-          epicorId: lineItem.RowIdent,
-          source: 'EpicorOrderProdMix',
-        };
-
-        let existRecord = await infoRecord(query);
-
-        if (!existRecord) {
-          try {
-            const searchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchLineItems({
-                body: {
-                  filterGroups: [{ filters: [{ propertyName: 'rowident_', operator: 'EQ', value: String(rowident) }] }],
-                  limit: 1,
-                  properties: ['rowident_', 'name', 'price'],
-                },
-              })
-            );
-            existRecord = searchData.results?.[0] || null;
-          } catch (searchError) {
-            existRecord = null;
-          }
+        const cleanProps = {};
+        for (const [key, value] of Object.entries(props)) {
+          if (value != null) cleanProps[key] = value;
         }
 
-        if (existRecord?.id || existRecord?.hubspotId) {
-          const lineItemId = existRecord?.hubspotId || existRecord?.id;
+        // Property-based dedup: skip if all properties match an existing line item
+        const match = findMatchingLineItem(existingLineItems, cleanProps);
+        if (match) {
+          fastify.log.info(`OrderProdMix line item for order ${orderNum} skipped (matches HubSpot line item ${match.id})`);
+          results.skipped++;
+          continue;
+        }
 
-          try {
-            await fastify.backoff(() =>
-              fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
-            );
-          } catch (error) {
-            if (error?.response?.data?.message?.toLowerCase() === 'resource not found') {
-              await deleteDataBase(query);
-              fastify.log.warn(`Line item ${rowident} deleted from DB`);
-              continue;
-            } else {
-              throw error;
-            }
-          }
+        // No match found — create new line item
+        const associations = dealId ? [{
+          to: { id: dealId },
+          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL }]
+        }] : [];
 
-          if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action: 'update' });
-          } else {
-            await createDataBase({
-              hubspotId: lineItemId,
-              epicorId: lineItem.RowIdent,
-              source: 'EpicorOrderProdMix',
-              orderNum: lineItem.OrderDtl_OrderNum,
-              action: 'create'
-            });
-          }
+        const created = await fastify.backoff(() =>
+          fastify.hubspotAdapter.createLineItem({ properties: cleanProps, associations })
+        );
+        const lineItemId = created.id;
 
-          if (dealId) {
-            try {
-              const assocResult = await fastify.hubspotAdapter.ensureAssociation(
-                'line_items',
-                lineItemId,
-                'deals',
-                dealId,
-                20
-              );
-              fastify.log.info(`OrderProdMix line item ${lineItemId} association ${assocResult?.skipped ? 'skipped' : 'created'} for deal ${dealId}`);
-            } catch (assocError) {
-              fastify.log.warn(`Failed to associate line item ${lineItemId} with deal ${dealId}: ${assocError.message}`);
-            }
+        await createDataBase({
+          hubspotId: lineItemId,
+          source: 'EpicorOrderProdMix',
+          orderNum,
+          action: 'create'
+        });
 
-            await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
-          }
+        // Track the newly created item so subsequent items in this batch can dedup against it
+        existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
 
-          results.updated++;
-        } else {
-          const associations = dealId ? [{
-            to: { id: dealId },
-            types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 20 }]
-          }] : [];
+        results.created++;
 
-          const created = await fastify.backoff(() =>
-            fastify.hubspotAdapter.createLineItem({ properties: cleanProps, associations })
-          );
-          const lineItemId = created.id;
-
-          await createDataBase({
-            hubspotId: lineItemId,
-            epicorId: lineItem.RowIdent,
-            source: 'EpicorOrderProdMix',
-            orderNum: lineItem.OrderDtl_OrderNum,
-            action: 'create'
-          });
-
-          results.created++;
-
-          if (dealId) {
-            await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
-          }
+        if (dealId) {
+          await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
         }
 
       } catch (error) {
-        fastify.log.error(`Line item ${rowident} failed: ${error.message}`);
+        fastify.log.error(`OrderProdMix line item for order ${orderNum} failed: ${error.message}`);
         results.errors++;
       }
     }
-    
-    fastify.log.info(`Individual processing complete: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
+
+    fastify.log.info(`OrderProdMix processing complete: ${results.created} created, ${results.skipped} skipped, ${results.errors} errors`);
   }
 
   async function syncLineItemsForOrder(orderNum, dealId) {
-    fastify.log.info(`Fetching line items for order ${orderNum}...`);
+    fastify.log.info(`Fetching OrderProdMix line items for order ${orderNum}`);
     const { records, metadata } = await fastify.epicorAdapter.fetchRelatedRecords(
       ENDPOINTS.ORDER_PROD_MIX,
       'OrderDtl_OrderNum',
       orderNum
     );
-    
+
     if (!records?.length) {
-      fastify.log.info(`No line items found for order ${orderNum}`);
+      fastify.log.info(`No OrderProdMix line items found for order ${orderNum}`);
       return { success: true, message: 'No line items for this order', lineItemCount: 0 };
     }
 
-    const lineItemMap = new Map();
+    // Dedup Epicor records by composite key (ProdGrup + Total + OrderNum)
+    const seen = new Set();
+    const uniqueRecords = [];
     for (const record of records) {
-      const rowIdent = record.RowIdent;
-      if (!rowIdent) continue;
-      
-      const existing = lineItemMap.get(rowIdent);
-      if (!existing || (record.Calculated_Time && (!existing.Calculated_Time || record.Calculated_Time > existing.Calculated_Time))) {
-        lineItemMap.set(rowIdent, record);
+      const key = `${record.ProdGrup_Character01 || ''}|${record.Calculated_Total || ''}|${record.OrderDtl_OrderNum || ''}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueRecords.push(record);
       }
     }
-    
-    const uniqueRecords = Array.from(lineItemMap.values());
-    fastify.log.info(`Found ${uniqueRecords.length} unique line items for order ${orderNum}, processing individually...`);
+
+    fastify.log.info(`Found ${records.length} OrderProdMix records, deduplicated to ${uniqueRecords.length} for order ${orderNum}`);
 
     const results = {
       total: uniqueRecords.length,
@@ -279,12 +232,11 @@ async function orderProdMixService(fastify, _) {
       updated: 0,
       errors: 0,
       skipped: 0,
-      errorDetails: []
     };
 
     await processLineItemsIndividually(uniqueRecords, dealId, results);
-    
-    fastify.log.info(`Order ${orderNum} line items sync complete: ${results.created} created, ${results.updated} updated, ${results.errors} errors, ${results.skipped} skipped`);
+
+    fastify.log.info(`Order ${orderNum} line items sync complete: ${results.created} created, ${results.skipped} skipped, ${results.errors} errors`);
 
     return {
       success: true,
@@ -302,7 +254,7 @@ async function orderProdMixService(fastify, _) {
       fastify.log.info('Processing Tasks for Order Line Items');
       return { success: true, message: 'Order line items processed by order service' };
     } catch (error) {
-      fastify.log.error(`Error processing Tasks for Order Line Items - ${error.message}`);
+      fastify.log.error(`Error processing Tasks for Order Line Items: ${error.message}`);
       throw error;
     }
   }

@@ -24,7 +24,7 @@ function transformEpicorToHubSpot(epicorContact) {
 }
 
 async function contactService(fastify, _) {
-  const { ENDPOINTS, BATCH_SIZES } = fastify.constants;
+  const { ENDPOINTS, BATCH_SIZES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const BATCH_SIZE = BATCH_SIZES.CONTACTS || 100;
   const UNIQUE_PROPERTY = 'email';
 
@@ -80,7 +80,7 @@ async function contactService(fastify, _) {
             companySearch.results[0].id,
             'contacts',
             contactId,
-            2
+            HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
           );
           fastify.log.info(`Associated contact ${email} to company ${companySearch.results[0].id}`);
         }
@@ -255,9 +255,7 @@ async function contactService(fastify, _) {
       fastify.log.info(`Batch processed: ${results.created} created, ${results.updated} updated, ${results.errors} errors`);
 
     } catch (error) {
-      fastify.log.error(`Batch upsert failed: ${error.message}`, {
-        response: error.response?.data
-      });
+      fastify.log.error(`Batch upsert failed: ${error.message} [${error.response?.status || 'no-status'}]`);
       
       results.errors = batchData.length;
       results.errorDetails.push({

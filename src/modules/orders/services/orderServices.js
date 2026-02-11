@@ -32,7 +32,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' },
   { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' },
   { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
-  { epicor: 'RowIdent', hubspot: 'rowident' },
+  { epicor: 'OrderHed_SysRowID', hubspot: 'rowident' },
 ];
 
 function transformEpicorToHubSpot(epicorOrder) {
@@ -54,7 +54,7 @@ function generateDealName(epicorOrder) {
 }
 
 async function orderService(fastify, _) {
-  const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES } = fastify.constants;
+  const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
   async function infoRecord(data) {
     return await fastify.orderRepository.findByIdProperty(data);
@@ -79,7 +79,7 @@ async function orderService(fastify, _) {
       dealId,
       'companies',
       companyId,
-      5
+      HUBSPOT_ASSOCIATIONS.DEAL_TO_COMPANY
     );
   }
 
@@ -118,7 +118,7 @@ async function orderService(fastify, _) {
 
       try {
         const query = {
-          epicorId: order.RowIdent,
+          epicorId: order.OrderHed_SysRowID,
           source: 'EpicorOrders',
         };
 
@@ -200,7 +200,7 @@ async function orderService(fastify, _) {
           } else {
             await createDataBase({
               hubspotId: dealId,
-              epicorId: order.RowIdent,
+              epicorId: order.OrderHed_SysRowID,
               source: 'EpicorOrders',
               orderNum: orderNum,
               action: 'create',
@@ -233,7 +233,7 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Order ${orderNum} UPDATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
+            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
           }
 
           // Check if this order has a matching quote and update it to Closed Won
@@ -257,7 +257,7 @@ async function orderService(fastify, _) {
 
           await createDataBase({
             hubspotId: dealId,
-            epicorId: order.RowIdent,
+            epicorId: order.OrderHed_SysRowID,
             source: 'EpicorOrders',
             orderNum: orderNum,
             action: 'create',
@@ -289,7 +289,7 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Order ${orderNum} CREATE - No custNum (OrderHed_CustNum was empty)`);
             }
           } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: errorMessage: ${associationError.message} httpStatus: ${associationError.response?.status} httpStatusText: ${associationError.response?.statusText} hubspotErrorData: ${JSON.stringify(associationError.response?.data)} hubspotMessage: ${associationError.response?.data?.message} hubspotCategory: ${associationError.response?.data?.category} errorStack: ${associationError.stack}`);
+            fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
           }
           // Check if this order has a matching quote and update it to Closed Won
           if (quoteNum && !usedQuoteDeal) {
@@ -305,18 +305,7 @@ async function orderService(fastify, _) {
         }
 
       } catch (error) {
-        fastify.log.error(`Individual order ${orderNum} failed:`, {
-          error: error.message,
-          stack: error.stack,
-          orderNum: orderNum,
-          orderData: {
-            OrderHed_OrderNum: order.OrderHed_OrderNum,
-            OrderHed_CustNum: order.OrderHed_CustNum,
-            Customer_Name: order.Customer_Name,
-            dealname: generateDealName(order)
-          },
-          properties: props
-        });
+        fastify.log.error(`Individual order ${orderNum} failed: ${error.message} [${error.response?.status || 'no-status'}]`);
         results.errors++;
       }
     }
@@ -344,7 +333,6 @@ async function orderService(fastify, _) {
 
       const uniqueRecords = Array.from(orderMap.values());
       fastify.log.info(`Fetched ${records.length} orders, deduplicated to ${uniqueRecords.length}, starting individual sync...`);
-      fastify.log.info(uniqueRecords)
 
       const results = {
         total: uniqueRecords.length,

@@ -1,11 +1,51 @@
 import fp from 'fastify-plugin';
 
+const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_PROPERTY_LENGTH = 1000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+
+const normalizeString = (value, maxLength = MAX_PROPERTY_LENGTH) => {
+  if (value === null || value === undefined || value === '') return null;
+  let str = String(value);
+  str = str.replaceAll('\u0000', '');
+  str = str.replaceAll(/[^\x20-\x7E\u00A0-\u00FF]/g, '?');
+  return str.substring(0, maxLength);
+};
+
+const normalizeProperties = (properties, maxLength = MAX_PROPERTY_LENGTH) => {
+  const cleaned = {};
+  if (!properties || typeof properties !== 'object') return cleaned;
+
+  for (const [key, value] of Object.entries(properties)) {
+    const normalized = normalizeString(value, maxLength);
+    if (normalized !== null && normalized !== undefined && normalized !== '') {
+      cleaned[key] = normalized;
+    }
+  }
+
+  return cleaned;
+};
+
+const isRetryableStatus = (status) => status === 429 || (status >= 500 && status <= 599);
+
+const computeRetryDelay = (attempt, retryAfterMs, baseDelayMs = 1000, maxDelayMs = 30000) => {
+  if (retryAfterMs) return Math.min(retryAfterMs, maxDelayMs);
+  const exponential = baseDelayMs * Math.pow(2, attempt - 1);
+  const jitter = Math.floor(Math.random() * 100);
+  return Math.min(exponential + jitter, maxDelayMs);
+};
+
 class HubspotAdapter {
-  constructor(httpClient, config, logger) {
+  constructor(httpClient, config, logger, constants) {
     this.client = httpClient;
     this.baseURL = 'https://api.hubapi.com';
     this.token = config.HUBSPOT_ACCESS_TOKEN;
     this.logger = logger;
+    this.maxRetries = constants?.MAX_RETRIES || 3;
+    this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
     
     if (!this.token) {
       this.logger.warn('HubSpot access token is empty');
@@ -13,312 +53,248 @@ class HubspotAdapter {
   }
 
   async _makeRequest(method, url, data = null, options = {}) {
+    if (!isNonEmptyString(method) || !isNonEmptyString(url)) {
+      throw new Error('HubSpot request requires a valid method and URL');
+    }
+
     const config = {
       method,
       url: `${this.baseURL}${url}`,
       headers: {
-        'Authorization': `Bearer ${this.token}`,
+        Authorization: `Bearer ${this.token}`,
         'Content-Type': 'application/json',
       },
-      timeout: 30000,
-      ...options
+      timeout: this.requestTimeout,
+      ...options,
     };
-    
-    if (data) {
+
+    if (data !== null && data !== undefined) {
       config.data = data;
     }
-    
-    try {
-      const response = await this.client(config);
-      return response;
-    } catch (error) {
-      let requestData = null;
-      if (data) {
-        requestData = Array.isArray(data.inputs)
-          ? { inputs: data.inputs.slice(0, 2), total: data.inputs.length }
-          : data;
+
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        const response = await this.client(config);
+        if (!response?.data) {
+          throw new Error('HubSpot response missing data');
+        }
+        return response;
+      } catch (error) {
+        const status = error?.response?.status;
+        const statusText = error?.response?.statusText || '';
+        const correlationId = error?.response?.headers?.['x-hubspot-correlation-id'];
+        const retryAfterHeader = error?.response?.headers?.['retry-after'];
+        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
+
+        if (!isRetryableStatus(status) || attempt >= this.maxRetries) {
+          const message = `HubSpot request failed: ${method.toUpperCase()} ${url} - ${status || 'unknown'} ${statusText}`;
+          this.logger.error(
+            `${message}${correlationId ? ` (correlationId: ${correlationId})` : ''}`,
+          );
+          throw new Error(message, { cause: error });
+        }
+
+        const delayMs = computeRetryDelay(attempt, retryAfterMs);
+        this.logger.warn(
+          `HubSpot request retry ${attempt} for ${method.toUpperCase()} ${url} in ${delayMs}ms (status ${status})`,
+        );
+        await sleep(delayMs);
       }
-      
-      this.logger.error(`HubSpot API request failed: ${error.message}`, {
-        url: config.url,
-        method: config.method,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        requestData
-      });
-      throw error;
     }
+
+    throw new Error(`HubSpot request failed after ${this.maxRetries} retries.`);
   }
 
   async batchUpsertCompanies(batchData, idProperty = 'customer_custid_') {
-    try {
-      this.logger.info(`Batch upsert: ${batchData.length} companies, idProperty: ${idProperty}`);
-      
-      const inputs = batchData.map((item, index) => {
-        if (!item.id) {
-          throw new Error(`Item ${index}: Missing id field`);
-        }
-        
-        if (!item.properties || typeof item.properties !== 'object') {
-          throw new Error(`Item ${index}: Invalid properties`);
-        }
-        
-        const uniquePropertyValue = item.properties[idProperty] || String(item.id);
-        if (!item.properties[idProperty]) {
-          item.properties[idProperty] = uniquePropertyValue;
-        }
-        
-        const cleanedProperties = {};
-        for (const [key, value] of Object.entries(item.properties)) {
-          if (value !== null && value !== undefined && value !== '') {
-            let cleanedValue = String(value);
-            cleanedValue = cleanedValue.replaceAll('\u0000', '');
-            cleanedValue = cleanedValue.replaceAll(/[^\x20-\x7E\u00A0-\u00FF]/g, '?');
-            cleanedProperties[key] = cleanedValue.substring(0, 1000);
-          }
-        }
-        
-        return {
-          id: String(item.id),
-          properties: cleanedProperties,
-          idProperty: idProperty
-        };
-      });
-      
-      try {
-        const response = await this._makeRequest(
-          'POST',
-          '/crm/v3/objects/companies/batch/upsert',
-          { inputs }
-        );
-        
-        const result = response.data;
-        
-        if (result.status === 'COMPLETE') {
-          const created = result.results?.filter(r => r.new)?.length || 0;
-          const updated = result.results?.filter(r => !r.new)?.length || 0;
-          this.logger.info(`Batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
-        } else {
-          this.logger.warn(`Batch status: ${result.status}`);
-        }
-        
-        return result;
-        
-      } catch (requestError) {
-        if (requestError.response?.status === 400) {
-          const errorData = requestError.response.data;
-          this.logger.error('HubSpot Batch Upsert Error Details:', {
-            message: errorData.message,
-            correlationId: errorData.correlationId,
-            errors: errorData.errors,
-            status: errorData.status,
-            category: errorData.category
-          });
-          
-          if (errorData.errors && errorData.errors.length > 0) {
-            errorData.errors.forEach((err, idx) => {
-              this.logger.error(`Error ${idx + 1}:`, {
-                message: err.message,
-                context: err.context,
-                subCategory: err.subCategory
-              });
-            });
-          }
-        }
-        throw requestError;
-      }
-      
-    } catch (error) {
-      if (error.response?.status === 400) {
-        this.logger.error({ errorResponse: error.response.data }, 'HubSpot Companies Batch Upsert - Full Error Response');
-        this.logger.error({ sampleInputs: batchData.slice(0, 2) }, 'HubSpot Companies Batch Upsert - Sample Inputs');
-      } else {
-        this.logger.error('HubSpot batchUpsertCompanies failed:', {
-          message: error.message,
-          stack: error.stack
-        });
-      }
-      throw error;
+    if (!Array.isArray(batchData)) {
+      throw new Error('batchUpsertCompanies requires an array of records');
     }
+    if (!isNonEmptyString(idProperty)) {
+      throw new Error('batchUpsertCompanies requires a valid idProperty');
+    }
+
+    this.logger.info(`Batch upsert: ${batchData.length} companies, idProperty: ${idProperty}`);
+
+    const inputs = batchData.map((item, index) => {
+      if (!item?.id) {
+        throw new Error(`Item ${index}: Missing id field`);
+      }
+      if (!item.properties || typeof item.properties !== 'object') {
+        throw new Error(`Item ${index}: Invalid properties`);
+      }
+
+      const properties = { ...item.properties };
+      const uniquePropertyValue = properties[idProperty] || String(item.id);
+      properties[idProperty] = uniquePropertyValue;
+
+      return {
+        id: String(item.id),
+        properties: normalizeProperties(properties),
+        idProperty: idProperty,
+      };
+    });
+
+    const response = await this._makeRequest(
+      'POST',
+      '/crm/v3/objects/companies/batch/upsert',
+      { inputs },
+    );
+
+    const result = response.data;
+
+    if (result?.status === 'COMPLETE') {
+      const created = result.results?.filter((r) => r.new)?.length || 0;
+      const updated = result.results?.filter((r) => !r.new)?.length || 0;
+      this.logger.info(`Batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
+    } else {
+      this.logger.warn(`Batch status: ${result?.status || 'unknown'}`);
+    }
+
+    return result;
   }
 
   async batchUpsertContacts(batchData, idProperty = 'email') {
-    try {
-      this.logger.info(`Batch upsert: ${batchData.length} contacts, idProperty: ${idProperty}`);
-      
-      const inputs = batchData.map((item, index) => {
-        if (!item.id) {
-          throw new Error(`Item ${index}: Missing id field`);
-        }
-        
-        if (!item.properties || typeof item.properties !== 'object') {
-          throw new Error(`Item ${index}: Invalid properties`);
-        }
-        
-        const uniquePropertyValue = item.properties[idProperty] || String(item.id);
-        if (!item.properties[idProperty]) {
-          item.properties[idProperty] = uniquePropertyValue;
-        }
-        
-        const cleanedProperties = {};
-        for (const [key, value] of Object.entries(item.properties)) {
-          if (value !== null && value !== undefined && value !== '') {
-            cleanedProperties[key] = String(value).substring(0, 1000);
-          }
-        }
-        
-        return {
-          id: String(item.id),
-          properties: cleanedProperties,
-          idProperty: idProperty
-        };
-      });
-      
-      const response = await this._makeRequest(
-        'POST',
-        '/crm/v3/objects/contacts/batch/upsert',
-        { inputs }
-      );
-      
-      const result = response.data;
-      
-      if (result.status === 'COMPLETE') {
-        const created = result.results?.filter(r => r.new)?.length || 0;
-        const updated = result.results?.filter(r => !r.new)?.length || 0;
-        this.logger.info(`Contacts batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
-      } else {
-        this.logger.warn(`Contacts batch status: ${result.status}`);
-      }
-      
-      return result;
-      
-    } catch (error) {
-      if (error.response?.status === 400) {
-        this.logger.error({ errorResponse: error.response.data }, 'HubSpot Contacts Batch Upsert - Full Error Response');
-        this.logger.error({ sampleInputs: batchData.slice(0, 2) }, 'HubSpot Contacts Batch Upsert - Sample Inputs');
-      }
-      throw error;
+    if (!Array.isArray(batchData)) {
+      throw new Error('batchUpsertContacts requires an array of records');
     }
+    if (!isNonEmptyString(idProperty)) {
+      throw new Error('batchUpsertContacts requires a valid idProperty');
+    }
+
+    this.logger.info(`Batch upsert: ${batchData.length} contacts, idProperty: ${idProperty}`);
+
+    const inputs = batchData.map((item, index) => {
+      if (!item?.id) {
+        throw new Error(`Item ${index}: Missing id field`);
+      }
+      if (!item.properties || typeof item.properties !== 'object') {
+        throw new Error(`Item ${index}: Invalid properties`);
+      }
+
+      const properties = { ...item.properties };
+      const uniquePropertyValue = properties[idProperty] || String(item.id);
+      properties[idProperty] = uniquePropertyValue;
+
+      return {
+        id: String(item.id),
+        properties: normalizeProperties(properties),
+        idProperty: idProperty,
+      };
+    });
+
+    const response = await this._makeRequest(
+      'POST',
+      '/crm/v3/objects/contacts/batch/upsert',
+      { inputs },
+    );
+
+    const result = response.data;
+
+    if (result?.status === 'COMPLETE') {
+      const created = result.results?.filter((r) => r.new)?.length || 0;
+      const updated = result.results?.filter((r) => !r.new)?.length || 0;
+      this.logger.info(`Contacts batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
+    } else {
+      this.logger.warn(`Contacts batch status: ${result?.status || 'unknown'}`);
+    }
+
+    return result;
   }
 
   async batchUpsertDeals(batchData, idProperty = 'orderhed_ordernum') {
-    let inputs;
-    try {
-      this.logger.info(`Batch upsert: ${batchData.length} deals, idProperty: ${idProperty}`);
-      
-      inputs = batchData.map((item, index) => {
-        if (!item.id) {
-          throw new Error(`Item ${index}: Missing id field`);
-        }
-        
-        if (!item.properties || typeof item.properties !== 'object') {
-          throw new Error(`Item ${index}: Invalid properties`);
-        }
-        
-        const uniquePropertyValue = item.properties[idProperty] || String(item.id);
-        if (!item.properties[idProperty]) {
-          item.properties[idProperty] = uniquePropertyValue;
-        }
-        
-        const cleanedProperties = {};
-        for (const [key, value] of Object.entries(item.properties)) {
-          if (value !== null && value !== undefined && value !== '') {
-            cleanedProperties[key] = String(value).substring(0, 1000);
-          }
-        }
-        
-        return {
-          id: String(item.id),
-          properties: cleanedProperties,
-          idProperty: idProperty
-        };
-      });
-      
-      const response = await this._makeRequest(
-        'POST',
-        '/crm/v3/objects/deals/batch/upsert',
-        { inputs }
-      );
-      
-      const result = response.data;
-      
-      if (result.status === 'COMPLETE') {
-        const created = result.results?.filter(r => r.new)?.length || 0;
-        const updated = result.results?.filter(r => !r.new)?.length || 0;
-        this.logger.info(`Deals batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
-      } else {
-        this.logger.warn(`Deals batch status: ${result.status}`);
-      }
-      
-      return result;
-      
-    } catch (error) {
-      if (error.response?.status === 400) {
-        this.logger.error({ errorResponse: error.response.data }, 'HubSpot Deals Batch Upsert - Full Error Response');
-        this.logger.error({ sampleInputs: inputs?.slice(0, 2) }, 'HubSpot Deals Batch Upsert - Sample Inputs');
-      }
-      throw error;
+    if (!Array.isArray(batchData)) {
+      throw new Error('batchUpsertDeals requires an array of records');
     }
+    if (!isNonEmptyString(idProperty)) {
+      throw new Error('batchUpsertDeals requires a valid idProperty');
+    }
+
+    this.logger.info(`Batch upsert: ${batchData.length} deals, idProperty: ${idProperty}`);
+
+    const inputs = batchData.map((item, index) => {
+      if (!item?.id) {
+        throw new Error(`Item ${index}: Missing id field`);
+      }
+      if (!item.properties || typeof item.properties !== 'object') {
+        throw new Error(`Item ${index}: Invalid properties`);
+      }
+
+      const properties = { ...item.properties };
+      const uniquePropertyValue = properties[idProperty] || String(item.id);
+      properties[idProperty] = uniquePropertyValue;
+
+      return {
+        id: String(item.id),
+        properties: normalizeProperties(properties),
+        idProperty: idProperty,
+      };
+    });
+
+    const response = await this._makeRequest(
+      'POST',
+      '/crm/v3/objects/deals/batch/upsert',
+      { inputs },
+    );
+
+    const result = response.data;
+
+    if (result?.status === 'COMPLETE') {
+      const created = result.results?.filter((r) => r.new)?.length || 0;
+      const updated = result.results?.filter((r) => !r.new)?.length || 0;
+      this.logger.info(`Deals batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
+    } else {
+      this.logger.warn(`Deals batch status: ${result?.status || 'unknown'}`);
+    }
+
+    return result;
   }
 
   async batchUpsertLineItems(batchData, idProperty = 'rowident_') {
-    try {
-      this.logger.info(`Batch upsert: ${batchData.length} line items, idProperty: ${idProperty}`);
-      
-      const inputs = batchData.map((item, index) => {
-        if (!item.id) {
-          throw new Error(`Item ${index}: Missing id field`);
-        }
-        
-        if (!item.properties || typeof item.properties !== 'object') {
-          throw new Error(`Item ${index}: Invalid properties`);
-        }
-        
-        const uniquePropertyValue = item.properties[idProperty] || String(item.id);
-        if (!item.properties[idProperty]) {
-          item.properties[idProperty] = uniquePropertyValue;
-        }
-        
-        const cleanedProperties = {};
-        for (const [key, value] of Object.entries(item.properties)) {
-          if (value !== null && value !== undefined && value !== '') {
-            cleanedProperties[key] = String(value).substring(0, 1000);
-          }
-        }
-        
-        return {
-          id: String(item.id),
-          properties: cleanedProperties,
-          idProperty: idProperty
-        };
-      });
-      
-      const response = await this._makeRequest(
-        'POST',
-        '/crm/v3/objects/line_items/batch/upsert',
-        { inputs }
-      );
-      
-      const result = response.data;
-      
-      if (result.status === 'COMPLETE') {
-        const created = result.results?.filter(r => r.new)?.length || 0;
-        const updated = result.results?.filter(r => !r.new)?.length || 0;
-        this.logger.info(`Line items batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
-      } else {
-        this.logger.warn(`Line items batch status: ${result.status}`);
-      }
-      
-      return result;
-      
-    } catch (error) {
-      if (error.response?.status === 400) {
-        this.logger.error({ errorResponse: error.response.data }, 'HubSpot Line Items Batch Upsert - Full Error Response');
-        this.logger.error({ sampleInputs: batchData.slice(0, 2) }, 'HubSpot Line Items Batch Upsert - Sample Inputs');
-      }
-      throw error;
+    if (!Array.isArray(batchData)) {
+      throw new Error('batchUpsertLineItems requires an array of records');
     }
+    if (!isNonEmptyString(idProperty)) {
+      throw new Error('batchUpsertLineItems requires a valid idProperty');
+    }
+
+    this.logger.info(`Batch upsert: ${batchData.length} line items, idProperty: ${idProperty}`);
+
+    const inputs = batchData.map((item, index) => {
+      if (!item?.id) {
+        throw new Error(`Item ${index}: Missing id field`);
+      }
+      if (!item.properties || typeof item.properties !== 'object') {
+        throw new Error(`Item ${index}: Invalid properties`);
+      }
+
+      const properties = { ...item.properties };
+      const uniquePropertyValue = properties[idProperty] || String(item.id);
+      properties[idProperty] = uniquePropertyValue;
+
+      return {
+        id: String(item.id),
+        properties: normalizeProperties(properties),
+        idProperty: idProperty,
+      };
+    });
+
+    const response = await this._makeRequest(
+      'POST',
+      '/crm/v3/objects/line_items/batch/upsert',
+      { inputs },
+    );
+
+    const result = response.data;
+
+    if (result?.status === 'COMPLETE') {
+      const created = result.results?.filter((r) => r.new)?.length || 0;
+      const updated = result.results?.filter((r) => !r.new)?.length || 0;
+      this.logger.info(`Line items batch completed: Created ${created}, Updated ${updated}, Errors: ${result.numErrors || 0}`);
+    } else {
+      this.logger.warn(`Line items batch status: ${result?.status || 'unknown'}`);
+    }
+
+    return result;
   }
 
   async searchCompaniesByProperty(propertyName, values) {
@@ -453,12 +429,6 @@ class HubspotAdapter {
           limit: chunk.length
         };
         
-        this.logger.info('Searching deals by property:', {
-          propertyName,
-          values: chunk,
-          requestBody: JSON.stringify(requestBody, null, 2)
-        });
-        
         const response = await this._makeRequest(
           'POST',
           '/crm/v3/objects/deals/search',
@@ -477,16 +447,7 @@ class HubspotAdapter {
       return { results: allResults };
       
     } catch (error) {
-      this.logger.error(`Batch search deals failed: ${error.message}`, {
-        propertyName,
-        values,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        hubspotError: error.response?.data,
-        hubspotMessage: error.response?.data?.message,
-        category: error.response?.data?.category,
-        validationResults: error.response?.data?.validationResults
-      });
+      this.logger.error(`Batch search deals failed for ${propertyName}: ${error.message}`);
       throw error;
     }
   }
@@ -504,119 +465,61 @@ class HubspotAdapter {
   }
 
   async createCompany({ properties }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const response = await this._makeRequest('POST', '/crm/v3/objects/companies', { 
-      properties: cleanedProperties 
+    const response = await this._makeRequest('POST', '/crm/v3/objects/companies', {
+      properties: normalizeProperties(properties),
     });
     return response.data;
   }
 
   async updateCompany({ companyId, properties }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const response = await this._makeRequest('PATCH', `/crm/v3/objects/companies/${companyId}`, { 
-      properties: cleanedProperties 
+    const response = await this._makeRequest('PATCH', `/crm/v3/objects/companies/${companyId}`, {
+      properties: normalizeProperties(properties),
     });
     return response.data;
   }
 
   async createContact({ properties }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const response = await this._makeRequest('POST', '/crm/v3/objects/contacts', { 
-      properties: cleanedProperties 
+    const response = await this._makeRequest('POST', '/crm/v3/objects/contacts', {
+      properties: normalizeProperties(properties),
     });
     return response.data;
   }
 
   async updateContact({ contactId, properties }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const response = await this._makeRequest('PATCH', `/crm/v3/objects/contacts/${contactId}`, { 
-      properties: cleanedProperties 
+    const response = await this._makeRequest('PATCH', `/crm/v3/objects/contacts/${contactId}`, {
+      properties: normalizeProperties(properties),
     });
     return response.data;
   }
 
   async createDeal({ properties, associations = [] }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const payload = { properties: cleanedProperties };
+    const payload = { properties: normalizeProperties(properties) };
     if (associations.length > 0) {
       payload.associations = associations;
     }
-    
     const response = await this._makeRequest('POST', '/crm/v3/objects/deals', payload);
     return response.data;
   }
 
   async updateDeal({ dealId, properties }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const response = await this._makeRequest('PATCH', `/crm/v3/objects/deals/${dealId}`, { 
-      properties: cleanedProperties 
+    const response = await this._makeRequest('PATCH', `/crm/v3/objects/deals/${dealId}`, {
+      properties: normalizeProperties(properties),
     });
     return response.data;
   }
 
   async createLineItem({ properties, associations = [] }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const payload = { properties: cleanedProperties };
+    const payload = { properties: normalizeProperties(properties) };
     if (associations.length > 0) {
       payload.associations = associations;
     }
-    
     const response = await this._makeRequest('POST', '/crm/v3/objects/line_items', payload);
     return response.data;
   }
 
   async updateLineItem({ lineItemId, properties }) {
-    const cleanedProperties = {};
-    for (const [key, value] of Object.entries(properties || {})) {
-      if (value !== null && value !== undefined && value !== '') {
-        cleanedProperties[key] = String(value);
-      }
-    }
-    
-    const response = await this._makeRequest('PATCH', `/crm/v3/objects/line_items/${lineItemId}`, { 
-      properties: cleanedProperties 
+    const response = await this._makeRequest('PATCH', `/crm/v3/objects/line_items/${lineItemId}`, {
+      properties: normalizeProperties(properties),
     });
     return response.data;
   }
@@ -639,6 +542,36 @@ class HubspotAdapter {
   async searchLineItems({ body }) {
     const response = await this._makeRequest('POST', '/crm/v3/objects/line_items/search', body);
     return response.data;
+  }
+
+  async getLineItemsForDeal(dealId, properties = []) {
+    const allLineItems = [];
+    let after;
+
+    do {
+      const assocData = await this.getAssociations('deals', dealId, 'line_items', { limit: 500, after });
+      const lineItemIds = (assocData?.results || []).map(r => r.toObjectId || r.id).filter(Boolean);
+
+      for (const lineItemId of lineItemIds) {
+        try {
+          const params = new URLSearchParams();
+          if (properties.length) params.set('properties', properties.join(','));
+          const queryString = params.toString();
+          const path = queryString
+            ? `/crm/v3/objects/line_items/${lineItemId}?${queryString}`
+            : `/crm/v3/objects/line_items/${lineItemId}`;
+
+          const response = await this._makeRequest('GET', path);
+          if (response.data) allLineItems.push(response.data);
+        } catch (error) {
+          this.logger.warn(`Failed to fetch line item ${lineItemId} for deal ${dealId}: ${error.message}`);
+        }
+      }
+
+      after = assocData?.paging?.next?.after;
+    } while (after);
+
+    return allLineItems;
   }
 
   async getAssociations(fromObjectType, fromObjectId, toObjectType, options = {}) {
@@ -763,9 +696,10 @@ async function hubspotAdapterPlugin(fastify, options) {
 
   try {
     const hubspotAdapter = new HubspotAdapter(
-      fastify.httpClient, 
+      fastify.httpClient,
       fastify.config,
-      fastify.log
+      fastify.log,
+      fastify.constants,
     );
     
     fastify.log.info('Testing HubSpot connection...');
@@ -788,5 +722,5 @@ async function hubspotAdapterPlugin(fastify, options) {
 
 export default fp(hubspotAdapterPlugin, {
   name: 'hubspotAdapter',
-  dependencies: ['httpClient', 'appConfig'],
+  dependencies: ['httpClient', 'appConfig', 'constants'],
 });

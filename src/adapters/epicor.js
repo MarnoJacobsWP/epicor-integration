@@ -36,43 +36,41 @@ export default fp(
               headers: this.headers,
               auth: this.credentials,
               timeout: this.REQUEST_TIMEOUT,
-              ...options
+              ...options,
             });
-            
+
             const duration = Date.now() - startTime;
-            
             fastify.log.debug(`Epicor API request: ${url} - ${response.status} - ${duration}ms`);
-            
-            if (response.data) {
-              return response;
+
+            if (!response?.data) {
+              throw new Error('Epicor API returned an empty response');
             }
 
-            fastify.log.warn(
-              `Attempt ${attempt} returned no data. Retrying after ${baseDelayMs * attempt}ms…`
-            );
+            return response;
           } catch (error) {
-            const status = error.response?.status;
-            const statusText = error.response?.statusText;
-            
-            fastify.log.warn(
-              { err: error },
-              `Epicor API attempt ${attempt} failed. Status: ${status} ${statusText}`
-            );
-            
-            if (status === 429) {
-              // Rate limited - exponential backoff
-              const waitTime = Math.min(baseDelayMs * Math.pow(2, attempt), 30000);
-              fastify.log.info(`Rate limited, waiting ${waitTime}ms before retry`);
-              await new Promise((res) => setTimeout(res, waitTime));
-            }
-          }
+            const status = error?.response?.status;
+            const statusText = error?.response?.statusText || '';
+            const isRetryable = status === 429 || (status >= 500 && status <= 599);
 
-          if (attempt < maxRetries) {
-            await new Promise((res) => setTimeout(res, baseDelayMs * attempt));
-          } else {
-            throw new Error(`Failed after ${maxRetries} retries for URL: ${url}`);
+            if (!isRetryable || attempt >= maxRetries) {
+              const message = `Epicor API request failed after ${attempt} attempts: ${status || 'unknown'} ${statusText}`;
+              throw new Error(message, { cause: error });
+            }
+
+            const retryAfterHeader = error?.response?.headers?.['retry-after'];
+            const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
+            const waitTime = Math.min(
+              retryAfterMs || baseDelayMs * Math.pow(2, attempt - 1),
+              30000,
+            );
+            fastify.log.warn(
+              `Epicor API attempt ${attempt} failed: ${status || 'unknown'} ${statusText}. Retrying in ${waitTime}ms`,
+            );
+            await new Promise((res) => setTimeout(res, waitTime));
           }
         }
+
+        throw new Error(`Epicor API request failed after ${maxRetries} retries.`);
       }
 
       async fetchAllRecords(queryName) {
@@ -93,26 +91,21 @@ export default fp(
         while (true) {
           const url = `${this.baseURL}/${queryName}/Data?$top=${top}&$skip=${skip}`;
 
-          try {
-            const response = await this._makeRequest(url);
-            const records = response.data.value || [];
-            pagesFetched++;
+          const response = await this._makeRequest(url);
+          const records = response.data.value || [];
+          pagesFetched++;
 
-            if (records.length === 0) {
-              break;
-            }
-
-            allRecords.push(...records);
-
-            if (records.length < top) {
-              break;
-            }
-
-            skip += top;
-          } catch (error) {
-            fastify.log.error(`Error fetching ${queryName}:`, error.message);
+          if (records.length === 0) {
             break;
           }
+
+          allRecords.push(...records);
+
+          if (records.length < top) {
+            break;
+          }
+
+          skip += top;
         }
 
         return {
@@ -139,26 +132,21 @@ export default fp(
         while (allRecords.length < maxRecords) {
           const url = `${this.baseURL}/${queryName}/Data?$top=${top}&$skip=${skip}`;
 
-          try {
-            const response = await this._makeRequest(url);
-            const records = response.data.value || [];
-            pagesFetched++;
+          const response = await this._makeRequest(url);
+          const records = response.data.value || [];
+          pagesFetched++;
 
-            if (records.length === 0) {
-              break;
-            }
-
-            allRecords.push(...records);
-
-            if (records.length < top || allRecords.length >= maxRecords) {
-              break;
-            }
-
-            skip += top;
-          } catch (error) {
-            fastify.log.error(`Error fetching ${queryName}:`, error.message);
+          if (records.length === 0) {
             break;
           }
+
+          allRecords.push(...records);
+
+          if (records.length < top || allRecords.length >= maxRecords) {
+            break;
+          }
+
+          skip += top;
         }
 
         return {
@@ -189,29 +177,21 @@ export default fp(
           
           fastify.log.info(`Fetching filtered records from: ${url}`);
 
-          try {
-            const response = await this._makeRequest(url);
-            const records = response.data.value || [];
-            pagesFetched++;
+          const response = await this._makeRequest(url);
+          const records = response.data.value || [];
+          pagesFetched++;
 
-            if (records.length === 0) {
-              break;
-            }
-
-            allRecords.push(...records);
-
-            if (records.length < top) {
-              break;
-            }
-
-            skip += top;
-          } catch (error) {
-            fastify.log.error(`Error fetching filtered ${queryName}:`, {
-              message: error.message,
-              url
-            });
+          if (records.length === 0) {
             break;
           }
+
+          allRecords.push(...records);
+
+          if (records.length < top) {
+            break;
+          }
+
+          skip += top;
         }
 
         return {
@@ -244,26 +224,21 @@ export default fp(
         while (true) {
           const url = `${this.baseURL}/${queryName}/Data?$top=${top}&$skip=${skip}&$filter=${encodeURIComponent(odataFilter)}`;
 
-          try {
-            const response = await this._makeRequest(url);
-            const records = response.data.value || [];
-            pagesFetched++;
+          const response = await this._makeRequest(url);
+          const records = response.data.value || [];
+          pagesFetched++;
 
-            if (records.length === 0) {
-              break;
-            }
-
-            allRecords.push(...records);
-
-            if (records.length < top) {
-              break;
-            }
-
-            skip += top;
-          } catch (error) {
-            fastify.log.error(`Error fetching related ${queryName}:`, error.message);
+          if (records.length === 0) {
             break;
           }
+
+          allRecords.push(...records);
+
+          if (records.length < top) {
+            break;
+          }
+
+          skip += top;
         }
 
         return {
