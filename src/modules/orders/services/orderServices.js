@@ -187,18 +187,81 @@ async function orderService(fastify, _) {
 
         if (existRecord?.id || existRecord?.hubspotId) {
           const dealId = existRecord?.hubspotId || existRecord?.id;
+          let needsCreate = false;
 
           try {
             await fastify.backoff(() =>
               fastify.hubspotAdapter.updateDeal({ dealId, properties: props })
             );
           } catch (error) {
-            if (error?.response?.data?.message?.toLowerCase() === 'resource not found') {
+            const status = error?.cause?.response?.status || error?.response?.status;
+            const message = error?.cause?.response?.data?.message || error?.response?.data?.message;
+            if (status === 404 || String(message || '').toLowerCase() === 'resource not found') {
               await deleteDataBase(query);
-              fastify.log.warn(`Order ${orderNum} deleted from DB`);
+              fastify.log.warn(`Order ${orderNum} deleted from DB because HubSpot deal ${dealId} was not found`);
+              needsCreate = true;
             } else {
               throw error;
             }
+          }
+
+          if (needsCreate) {
+            const created = await fastify.backoff(() =>
+              fastify.hubspotAdapter.createDeal({ properties: props })
+            );
+            const newDealId = created.id;
+
+            fastify.log.info(`Order ${orderNum} recreated in HubSpot ${newDealId}`);
+
+            await createDataBase({
+              hubspotId: newDealId,
+              epicorId: order.OrderHed_SysRowID,
+              source: 'EpicorOrders',
+              orderNum: orderNum,
+              action: 'create',
+              timestamp: new Date()
+            });
+
+            try {
+              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, newDealId);
+            } catch (lineItemError) {
+              fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
+            }
+
+            try {
+              const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
+              fastify.log.info(`Order ${orderNum} CREATE - Raw CustNum: ${order.OrderHed_CustNum}, Padded: ${custNum}`);
+              if (custNum) {
+                const companySearch = await fastify.backoff(() =>
+                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+                );
+                fastify.log.info(`Order ${orderNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
+                if (companySearch.results?.[0]?.id) {
+                  fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate deal ${newDealId} with company ${companySearch.results[0].id} using type 5`);
+                  const assocResult = await ensureDealCompanyAssociation(newDealId, companySearch.results[0].id);
+                  fastify.log.info(`Order ${orderNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
+                } else {
+                  fastify.log.warn(`Order ${orderNum} CREATE - No company found with customer_custnum=${custNum}`);
+                }
+              } else {
+                fastify.log.warn(`Order ${orderNum} CREATE - No custNum (OrderHed_CustNum was empty)`);
+              }
+            } catch (associationError) {
+              fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
+            }
+
+            // Check if this order has a matching quote and update it to Closed Won
+            if (quoteNum && !usedQuoteDeal) {
+              const quoteSearchData = await fastify.backoff(() =>
+                fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+              );
+              if (quoteSearchData.results?.[0]?.id) {
+                await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
+              }
+            }
+
+            results.created++;
+            continue;
           }
 
           const action = 'updated';

@@ -107,7 +107,13 @@ async function qSeatEtabService(fastify, _) {
         );
         const lineItemId = created.id;
 
+        const epicorId = lineItem.SysRowID
+          || lineItem.QuoteDtl_SysRowID
+          || `${quoteNum}|${lineItem.QuoteDtl_PartNum || ''}|${lineItem.QuoteDtl_LineDesc || ''}|${lineItem.QuoteDtl_OrderQty || ''}`
+          || lineItemId;
+
         await createDataBase({
+          epicorId: String(epicorId),
           hubspotId: lineItemId,
           source: 'EpicorQSeatEtab',
           quoteNum,

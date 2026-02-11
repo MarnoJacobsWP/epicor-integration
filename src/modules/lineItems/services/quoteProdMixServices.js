@@ -179,7 +179,13 @@ async function quoteProdMixService(fastify, _) {
         );
         const lineItemId = created.id;
 
+        const epicorId = lineItem.SysRowID
+          || lineItem.QuoteDtl_SysRowID
+          || `${quoteNum}|${lineItem.ProdGrup_Character01 || ''}|${lineItem.Calculated_Total || ''}`
+          || lineItemId;
+
         await createDataBase({
+          epicorId: String(epicorId),
           hubspotId: lineItemId,
           source: 'EpicorQuoteProdMix',
           quoteNum,
