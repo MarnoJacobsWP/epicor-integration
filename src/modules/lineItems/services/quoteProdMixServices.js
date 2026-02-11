@@ -7,7 +7,7 @@ const toProdGrupValue = (v) => {
 
 const FIELD_MAPPINGS = [
   { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },
-  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_characterna', transform: toProdGrupValue },
+   { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toProdGrupValue },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
 ];
 
@@ -94,7 +94,7 @@ async function quoteProdMixService(fastify, _) {
   async function appendDealProdGrupValue(dealId, prodGrupValue) {
     if (!dealId || !prodGrupValue) return;
 
-    const propertyName = 'prodgrup_characterna';
+     const propertyName = 'prodgrup_character01';
     try {
       if (dealProdGrupPropertyCache === false) return;
       if (dealProdGrupPropertyCache === null) {
@@ -197,7 +197,7 @@ async function quoteProdMixService(fastify, _) {
 
       try {
         const props = transformEpicorToHubSpot(lineItem);
-        props.name = props.prodgrup_characterna || 'Unnamed Product';
+         props.name = props.prodgrup_character01 || 'Unnamed Product';
 
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {
@@ -267,7 +267,7 @@ async function quoteProdMixService(fastify, _) {
             results.updated++;
 
             if (dealId) {
-              await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
+               await appendDealProdGrupValue(dealId, props.prodgrup_character01);
             }
             continue;
           }
@@ -314,7 +314,7 @@ async function quoteProdMixService(fastify, _) {
         results.created++;
 
         if (dealId) {
-          await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
+           await appendDealProdGrupValue(dealId, props.prodgrup_character01);
         }
 
       } catch (error) {
@@ -363,7 +363,7 @@ async function quoteProdMixService(fastify, _) {
       updatedCount: results.updated,
       errorCount: results.errors,
       skippedCount: results.skipped,
-      prodgrupValues: [...new Set(uniqueRecords.map(r => toValidProdGrup(r.ProdGrup_Character01)).filter(Boolean))]
+       prodgrupValues: [...new Set(uniqueRecords.map(r => toProdGrupValue(r.ProdGrup_Character01)).filter(Boolean))]
     };
   }
 
