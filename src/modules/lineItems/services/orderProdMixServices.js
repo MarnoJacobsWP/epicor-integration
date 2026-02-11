@@ -54,8 +54,22 @@ async function orderProdMixService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   let dealProdGrupPropertyCache = null;
 
-  async function createDataBase(data) {
-    return await fastify.lineItemRepository.insertDatabase(data);
+  async function upsertLineItemRecord(data) {
+    const query = { epicorId: String(data.epicorId) };
+    const existing = await fastify.lineItemRepository.findByQuery(query);
+    if (existing) {
+      await fastify.lineItemRepository.updateDatabase(query, data);
+      return { updated: true, existing };
+    }
+    await fastify.lineItemRepository.insertDatabase(data);
+    return { created: true };
+  }
+
+  function getEpicorId(lineItem, orderNum, fallbackId) {
+    return lineItem.SysRowID
+      || lineItem.OrderDtl_SysRowID
+      || `${orderNum}|${lineItem.ProdGrup_Character01 || ''}|${lineItem.Calculated_Total || ''}`
+      || fallbackId;
   }
 
   async function appendDealProdGrupValue(dealId, prodGrupValue) {
@@ -63,11 +77,13 @@ async function orderProdMixService(fastify, _) {
 
     const propertyName = 'prodgrup_characterna';
     try {
+      if (dealProdGrupPropertyCache === false) return;
       if (dealProdGrupPropertyCache === null) {
         dealProdGrupPropertyCache = await fastify.hubspotAdapter.getObjectProperty('deals', propertyName);
       }
 
       if (!dealProdGrupPropertyCache) {
+        dealProdGrupPropertyCache = false;
         fastify.log.warn(`Deal ${dealId} - ${propertyName} property not found on deals; skipping update`);
         return;
       }
@@ -156,11 +172,51 @@ async function orderProdMixService(fastify, _) {
           if (value != null) cleanProps[key] = value;
         }
 
+        const epicorId = getEpicorId(lineItem, orderNum);
+        const existingRecord = epicorId
+          ? await fastify.lineItemRepository.findByQuery({ epicorId: String(epicorId) })
+          : null;
+
         // Property-based dedup: skip if all properties match an existing line item
         const match = findMatchingLineItem(existingLineItems, cleanProps);
         if (match) {
           fastify.log.info(`OrderProdMix line item for order ${orderNum} skipped (matches HubSpot line item ${match.id})`);
           results.skipped++;
+          continue;
+        }
+
+        if (existingRecord?.hubspotId) {
+          const lineItemId = existingRecord.hubspotId;
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
+          );
+
+          if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+            await fastify.hubspotAdapter.ensureAssociation(
+              'line_items',
+              lineItemId,
+              'deals',
+              dealId,
+              HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+            );
+          }
+
+          await fastify.lineItemRepository.updateDatabase(
+            { epicorId: String(epicorId) },
+            {
+              hubspotId: lineItemId,
+              source: 'EpicorOrderProdMix',
+              orderNum,
+              action: 'update',
+            }
+          );
+
+          existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
+          results.updated++;
+
+          if (dealId) {
+            await appendDealProdGrupValue(dealId, props.prodgrup_characterna);
+          }
           continue;
         }
 
@@ -179,13 +235,10 @@ async function orderProdMixService(fastify, _) {
         );
         const lineItemId = created.id;
 
-        const epicorId = lineItem.SysRowID
-          || lineItem.OrderDtl_SysRowID
-          || `${orderNum}|${lineItem.ProdGrup_Character01 || ''}|${lineItem.Calculated_Total || ''}`
-          || lineItemId;
+        const resolvedEpicorId = epicorId || getEpicorId(lineItem, orderNum, lineItemId);
 
-        await createDataBase({
-          epicorId: String(epicorId),
+        await upsertLineItemRecord({
+          epicorId: String(resolvedEpicorId),
           hubspotId: lineItemId,
           source: 'EpicorOrderProdMix',
           orderNum,

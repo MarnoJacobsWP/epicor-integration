@@ -53,6 +53,30 @@ function generateDealName(epicorOrder) {
   return `${jobName} - ${customerName}`;
 }
 
+function extractHubspotErrorContext(error) {
+  const chain = [];
+  let current = error;
+  while (current && chain.length < 5) {
+    chain.push(current);
+    current = current.cause;
+  }
+
+  let status;
+  let message;
+  for (const err of chain) {
+    if (status == null && err?.response?.status != null) status = err.response.status;
+    if (!message) {
+      message = err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.message
+        || message;
+    }
+  }
+
+  const combinedMessage = chain.map((err) => err?.message).filter(Boolean).join(' | ');
+  return { status, message, combinedMessage };
+}
+
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
@@ -194,9 +218,13 @@ async function orderService(fastify, _) {
               fastify.hubspotAdapter.updateDeal({ dealId, properties: props })
             );
           } catch (error) {
-            const status = error?.cause?.response?.status || error?.response?.status;
-            const message = error?.cause?.response?.data?.message || error?.response?.data?.message;
-            if (status === 404 || String(message || '').toLowerCase() === 'resource not found') {
+            const { status, message, combinedMessage } = extractHubspotErrorContext(error);
+            const combined = String(combinedMessage || '');
+            const notFound = status === 404
+              || String(message || '').toLowerCase().includes('resource not found')
+              || combined.toLowerCase().includes('resource not found')
+              || /\b404\b/.test(combined);
+            if (notFound) {
               await deleteDataBase(query);
               fastify.log.warn(`Order ${orderNum} deleted from DB because HubSpot deal ${dealId} was not found`);
               needsCreate = true;
