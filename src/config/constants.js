@@ -22,6 +22,7 @@ export const constants = {
   HUBSPOT_DEAL_STAGES: {
     QUOTE_CREATED: '2817003207',
     CLOSED_WON: 'closedwon',
+    CLOSED_LOST: 'closedlost',
   },
   HUBSPOT_ASSOCIATIONS: {
     COMPANY_TO_CONTACT: 2,

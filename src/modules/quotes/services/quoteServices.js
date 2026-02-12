@@ -169,11 +169,15 @@ async function quoteService(fastify, _) {
 
         props = transformEpicorToHubSpot(quote);
         props.dealname = generateDealName(quote);
-        const isWon = props.task_conclusion === 'WIN';
+        const normalizedConclusion = String(props.task_conclusion || '').trim().toUpperCase();
+        const isWon = normalizedConclusion === 'WIN';
+        const isLost = normalizedConclusion === 'LOSE';
         
         props.pipeline = HUBSPOT_PIPELINES.QUOTES;
         if (isWon) {
           props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
+        } else if (isLost) {
+          props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_LOST;
         } else if (!existRecord) {
           props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
         }
@@ -190,7 +194,7 @@ async function quoteService(fastify, _) {
 
           try {
             const updateProps = { ...props };
-            if (!isWon) {
+            if (!isWon && !isLost) {
               delete updateProps.pipeline;
               delete updateProps.dealstage;
             }
@@ -214,7 +218,7 @@ async function quoteService(fastify, _) {
           }
 
           if (needsCreate) {
-            if (!isWon && !props.dealstage) {
+            if (!isWon && !isLost && !props.dealstage) {
               props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
             }
 
@@ -272,7 +276,12 @@ async function quoteService(fastify, _) {
             continue;
           }
 
-          const action = isWon ? 'updated_to_closed_won' : 'updated';
+          let action = 'updated';
+          if (isWon) {
+            action = 'updated_to_closed_won';
+          } else if (isLost) {
+            action = 'updated_to_closed_lost';
+          }
           fastify.log.info(`Quote ${quoteNum} ${action} in HubSpot ${dealId}`);
 
           if (existRecord?.hubspotId) {
