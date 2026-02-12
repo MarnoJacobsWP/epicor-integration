@@ -68,6 +68,9 @@
     "FILTER_TIMESTAMP": {
       "type": "integer"
     },
+    "EXPORT_DIR": {
+      "type": "string"
+    },
     "HUBSPOT_PIPELINE_QUOTES": {
       "type": "string",
       "default": "default"

@@ -101,7 +101,8 @@ export default async function app(fastify, opts) {
       'orders',
       'quotes',
       'sync',
-      'system'
+      'system',
+      'epicorExport'
     ];
 
     for (const moduleName of modules) {
