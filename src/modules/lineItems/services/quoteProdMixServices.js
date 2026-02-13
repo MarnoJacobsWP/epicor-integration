@@ -144,6 +144,7 @@ async function quoteProdMixService(fastify, _) {
       try {
         const props = transformEpicorToHubSpot(lineItem);
         props.name = props.prodgrup_character01 || 'Unnamed Product';
+        props.quantity = 1;
 
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {

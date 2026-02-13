@@ -19,14 +19,14 @@ const toValidSalesRep = (v) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum_', transform: String },
-  { epicor: 'QuoteHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
+  { epicor: 'QuoteHed_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
+  { epicor: 'QuoteHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
   { epicor: 'Customer_Name', hubspot: 'customer_name' },
   { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },
   { epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },
   { epicor: 'QuoteHed_CurrentStage', hubspot: 'quotehed_currentstage' },
-  { epicor: 'QuoteHed_Character08', hubspot: 'quotehed_character08' },
-  { epicor: 'QuoteHed_ShortChar09', hubspot: 'quotehed_shortchar09' },
+  { epicor: 'QuoteHed_Character08', hubspot: 'orderhed_characternh' },
+  { epicor: 'QuoteHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
   { epicor: 'QuoteHed_Character10', hubspot: 'quotehed_character10' },
   { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toValidSalesRep },
   { epicor: 'QuoteHed_ShortChar01', hubspot: 'quotehed_shortchar01' },

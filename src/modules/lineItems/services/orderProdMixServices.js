@@ -10,6 +10,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'OrderDtl_OrderNum', hubspot: 'orderdtl_ordernum', transform: Number },
   { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toSingleLineText },
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
+  { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
 ];
 
 /**
@@ -144,6 +145,7 @@ async function orderProdMixService(fastify, _) {
       try {
         const props = transformEpicorToHubSpot(lineItem);
         props.name = props.prodgrup_character01 || 'Unnamed Product';
+        props.quantity = 1;
 
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {

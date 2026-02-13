@@ -102,7 +102,7 @@ async function qSeatEtabService(fastify, _) {
         props.name = props.prodgrup_description || 'Unnamed Product';
         props.hs_sku = props.quotedtl_partnum;
         props.description = props.quotedtl_linedesc;
-        props.quantity = props.quotedtl_orderqty || 0;
+        props.quantity = 1;
 
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {

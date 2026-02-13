@@ -1,10 +1,6 @@
 import fp from 'fastify-plugin';
 
 async function syncService(fastify, _) {
-  async function infoRecord(data) {
-    return await fastify.syncRepository.findByIdProperty(data);
-  }
-
   async function updateDataBase(filter, data) {
     return await fastify.syncRepository.updateDatabase(filter, data);
   }
@@ -44,21 +40,10 @@ async function syncService(fastify, _) {
       syncLog._id = createdLog.insertedId;
 
       const results = {
-        contacts: null,
         customers: null,
         orders: null,
         quotes: null,
       };
-
-      try {
-        fastify.log.info('Starting contacts sync...');
-        results.contacts = await fastify.contactTask.task(dateString);
-        syncLog.recordsProcessed += results.contacts?.syncedCount || 0;
-        syncLog.errors += results.contacts?.errorCount || 0;
-      } catch (error) {
-        fastify.log.error(`Contacts sync failed: ${error.message}`);
-        syncLog.errors++;
-      }
 
       try {
         fastify.log.info('Starting customers sync...');

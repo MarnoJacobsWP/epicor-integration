@@ -9,7 +9,7 @@ const toMidnightUTC = (v) => {
 
 const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_OrderNum', hubspot: 'orderhed_ordernum', transform: String },
-  { epicor: 'OrderHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
+  { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
   { epicor: 'OrderDtl_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
   { epicor: 'OrderHed_OrderDate', hubspot: 'orderhed_orderdate', transform: toMidnightUTC },
   { epicor: 'OrderHed_CheckBox10', hubspot: 'orderhed_checkboxan', transform: Boolean },
@@ -17,20 +17,20 @@ const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_Character08', hubspot: 'orderhed_characternh' },
   { epicor: 'OrderHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
   { epicor: 'SalesRep_Name', hubspot: 'salesrep_name' },
-  { epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' },
-  { epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' },
+  { epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' }, //quotehed_shortchar01 in prod - orderhed_shortchar01 in dev
+  { epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' }, //quotehed_shortchar02 in prod - orderhed_shortchar02 in dev
   { epicor: 'OrderHed_ShortChar03', hubspot: 'orderhed_shortchar03' },
-  { epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' },
+  { epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' }, //quotehed_shortchar04 in prod - orderhed_shortchar04 in dev
   { epicor: 'OrderHed_UserChar3', hubspot: 'orderhed_userchar3' },
   { epicor: 'OrderHed_Character01', hubspot: 'orderhed_character01' },
   { epicor: 'OrderHed_ShortChar05', hubspot: 'orderhed_shortchar05' },
   { epicor: 'OrderHed_ShortChar06', hubspot: 'orderhed_shortchar06' },
   { epicor: 'OrderHed_ShortChar07', hubspot: 'orderhed_shortchar07' },
-  { epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' },
-  { epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' },
-  { epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' },
-  { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' },
-  { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' },
+  { epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' }, //quotehed_character04 in prod - orderhed_character04 in dev
+  { epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' }, //quotehed_character05 in prod - orderhed_character05 in dev
+  { epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' }, //quotehed_character06 in prod - orderhed_character06 in dev
+  { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' }, //quotehed_character02 in prod - orderhed_character02 in dev
+  { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' }, //quotehed_character03 in prod - orderhed_character03 in dev
   { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
   { epicor: 'OrderHed_SysRowID', hubspot: 'rowident' },
 ];
