@@ -160,8 +160,33 @@ async function orderProdMixService(fastify, _) {
         // Property-based dedup: skip if all properties match an existing line item
         const match = findMatchingLineItem(existingLineItems, cleanProps);
         if (match) {
-          fastify.log.info(`OrderProdMix line item for order ${orderNum} skipped (matches HubSpot line item ${match.id})`);
-          results.skipped++;
+          const lineItemId = match.id;
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
+          );
+
+          if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+            await fastify.hubspotAdapter.ensureAssociation(
+              'line_items',
+              lineItemId,
+              'deals',
+              dealId,
+              HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+            );
+          }
+
+          if (epicorId) {
+            await upsertLineItemRecord({
+              epicorId: String(epicorId),
+              hubspotId: lineItemId,
+              source: 'EpicorOrderProdMix',
+              orderNum,
+              action: 'update'
+            });
+          }
+
+          fastify.log.info(`OrderProdMix line item for order ${orderNum} updated on existing HubSpot line item ${lineItemId}`);
+          results.updated++;
           continue;
         }
 

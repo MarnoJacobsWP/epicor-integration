@@ -159,8 +159,33 @@ async function quoteProdMixService(fastify, _) {
         // Property-based dedup: skip if all properties match an existing line item
         const match = findMatchingLineItem(existingLineItems, cleanProps);
         if (match) {
-          fastify.log.info(`QuoteProdMix line item for quote ${quoteNum} skipped (matches HubSpot line item ${match.id})`);
-          results.skipped++;
+          const lineItemId = match.id;
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
+          );
+
+          if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+            await fastify.hubspotAdapter.ensureAssociation(
+              'line_items',
+              lineItemId,
+              'deals',
+              dealId,
+              HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+            );
+          }
+
+          if (epicorId) {
+            await upsertLineItemRecord({
+              epicorId: String(epicorId),
+              hubspotId: lineItemId,
+              source: 'EpicorQuoteProdMix',
+              quoteNum,
+              action: 'update'
+            });
+          }
+
+          fastify.log.info(`QuoteProdMix line item for quote ${quoteNum} updated on existing HubSpot line item ${lineItemId}`);
+          results.updated++;
           continue;
         }
 

@@ -13,7 +13,7 @@ const FIELD_MAPPINGS = [
  * If ALL of these HubSpot properties match an existing line item, it is skipped.
  * Order/quote numbers are intentionally ignored to dedupe across order/quote syncs.
  */
-const DEDUP_PROPERTIES = ['name', 'quantity'];
+const DEDUP_PROPERTIES = ['name', 'hs_sku'];
 
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
@@ -112,8 +112,35 @@ async function qSeatEtabService(fastify, _) {
         // Property-based dedup: skip if all properties match an existing line item
         const match = findMatchingLineItem(existingLineItems, cleanProps);
         if (match) {
-          fastify.log.info(`QSeatEtab line item for quote ${quoteNum} skipped (matches HubSpot line item ${match.id})`);
-          results.skipped++;
+          const lineItemId = match.id;
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
+          );
+
+          if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
+            await fastify.hubspotAdapter.ensureAssociation(
+              'line_items',
+              lineItemId,
+              'deals',
+              dealId,
+              HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
+            );
+          }
+
+          if (epicorId) {
+            await fastify.lineItemRepository.updateDatabase(
+              { epicorId: String(epicorId) },
+              {
+                hubspotId: lineItemId,
+                source: 'EpicorQSeatEtab',
+                quoteNum,
+                action: 'update',
+              }
+            );
+          }
+
+          fastify.log.info(`QSeatEtab line item for quote ${quoteNum} updated on existing HubSpot line item ${lineItemId}`);
+          results.updated++;
           continue;
         }
 
