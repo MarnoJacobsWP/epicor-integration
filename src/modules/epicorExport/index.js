@@ -67,9 +67,10 @@ export default fp(
       }
     });
 
-    fastify.get('/epicor/export/test/qseatetab/hardcoded', async (_request, reply) => {
+    fastify.get('/epicor/export/test/qseatetab/hardcoded', async (request, reply) => {
       try {
-        const result = await fastify.epicorExportService.exportQSeatEtabForHardcodedQuote();
+        const { quoteNum } = request.query || {};
+        const result = await fastify.epicorExportService.exportQSeatEtabForHardcodedQuote(quoteNum);
         return reply.send(result);
       } catch (error) {
         fastify.log.error(`Epicor qseatetab hardcoded export failed: ${error.message}`);
