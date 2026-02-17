@@ -198,10 +198,42 @@ async function epicorExportService(fastify, _) {
       throw new Error('Missing BASE_URL configuration for Epicor API');
     }
 
-    const directUrl = `${baseUrl}/${qseatEndpoint}(68138)/?QuoteNum=${encodeURIComponent(quoteNum)}`;
     const startTime = Date.now();
-    const response = await fastify.epicorAdapter._makeRequest(directUrl);
-    const records = response?.data?.value || [];
+    const encodedQuoteNum = encodeURIComponent(quoteNum);
+    const candidateUrls = [
+      `${baseUrl}/${qseatEndpoint}(68138)/Data?QuoteNum=${encodedQuoteNum}`,
+      `${baseUrl}/${qseatEndpoint}(68138)/Data/?QuoteNum=${encodedQuoteNum}`,
+      `${baseUrl}/${qseatEndpoint}(68138)/?QuoteNum=${encodedQuoteNum}`,
+    ];
+
+    let requestUrl = candidateUrls[0];
+    let records = [];
+    let lastError = null;
+
+    for (const url of candidateUrls) {
+      try {
+        const response = await fastify.epicorAdapter._makeRequest(url);
+        const candidateRecords = response?.data?.value || [];
+
+        const isEntitySetDescriptor = candidateRecords.length === 1
+          && candidateRecords[0]?.url === 'Data'
+          && candidateRecords[0]?.kind === 'EntitySet';
+
+        if (isEntitySetDescriptor) {
+          continue;
+        }
+
+        requestUrl = url;
+        records = candidateRecords;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!records.length && lastError) {
+      throw lastError;
+    }
 
     const metadata = {
       totalRecords: records.length,
@@ -214,7 +246,7 @@ async function epicorExportService(fastify, _) {
       endpoint: qseatEndpoint,
       exportedAt: new Date().toISOString(),
       hardcodedQuoteNum: quoteNum,
-      requestUrl: directUrl,
+      requestUrl,
       filterMode: 'direct-baq-quote-param',
       metadata,
       records,
