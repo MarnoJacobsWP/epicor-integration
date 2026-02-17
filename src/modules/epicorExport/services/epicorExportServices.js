@@ -193,15 +193,20 @@ async function epicorExportService(fastify, _) {
       throw new TypeError('Quote number is required');
     }
 
-    const { records: allRecords, metadata: sourceMetadata } = await fastify.epicorAdapter.fetchAllRecords(qseatEndpoint);
+    const baseUrl = String(fastify.config?.BASE_URL || '').replace(/\/+$/, '');
+    if (!baseUrl) {
+      throw new Error('Missing BASE_URL configuration for Epicor API');
+    }
 
-    const records = (allRecords || []).filter((record) => String(record?.QuoteDtl_QuoteNum ?? '').trim() === quoteNum);
+    const directUrl = `${baseUrl}/${qseatEndpoint}(68138)/?QuoteNum=${encodeURIComponent(quoteNum)}`;
+    const startTime = Date.now();
+    const response = await fastify.epicorAdapter._makeRequest(directUrl);
+    const records = response?.data?.value || [];
 
     const metadata = {
       totalRecords: records.length,
-      sourceTotalRecords: sourceMetadata?.totalRecords || 0,
-      pagesFetched: sourceMetadata?.pagesFetched || 0,
-      elapsedTimeMs: sourceMetadata?.elapsedTimeMs || 0,
+      pagesFetched: 1,
+      elapsedTimeMs: Date.now() - startTime,
     };
 
     const payload = {
@@ -209,8 +214,8 @@ async function epicorExportService(fastify, _) {
       endpoint: qseatEndpoint,
       exportedAt: new Date().toISOString(),
       hardcodedQuoteNum: quoteNum,
-      filter: `QuoteDtl_QuoteNum == ${quoteNum}`,
-      filterMode: 'local-filter-after-fetch-all',
+      requestUrl: directUrl,
+      filterMode: 'direct-baq-quote-param',
       metadata,
       records,
     };
