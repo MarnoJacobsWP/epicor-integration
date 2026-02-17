@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 const normalizeTableKey = (table) => String(table || '').trim().toUpperCase();
 
 const sanitizeFileName = (name) => name.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
+const HARDCODED_QSEAT_ETAB_QUOTE_NUM = '167006';
 
 async function epicorExportService(fastify, _) {
   const { ENDPOINTS } = fastify.constants;
@@ -180,10 +181,46 @@ async function epicorExportService(fastify, _) {
     };
   };
 
+  const exportQSeatEtabForHardcodedQuote = async () => {
+    const qseatEndpoint = ENDPOINTS.QSEAT_ETAB;
+    if (!qseatEndpoint) {
+      throw new Error('Missing QSEAT_ETAB endpoint configuration');
+    }
+
+    const quoteNum = HARDCODED_QSEAT_ETAB_QUOTE_NUM;
+    const { records, metadata } = await fastify.epicorAdapter.fetchRelatedRecords(
+      qseatEndpoint,
+      'QuoteDtl_QuoteNum',
+      quoteNum
+    );
+
+    const payload = {
+      test: 'qseatetab-hardcoded-quote',
+      endpoint: qseatEndpoint,
+      exportedAt: new Date().toISOString(),
+      hardcodedQuoteNum: quoteNum,
+      metadata,
+      records,
+    };
+
+    const filePath = await writeJsonFile(`QSEAT_ETAB_${quoteNum}_${Date.now()}`, payload);
+
+    return {
+      success: true,
+      exportDir,
+      filePath,
+      quoteNum,
+      totalRecords: metadata.totalRecords,
+      pagesFetched: metadata.pagesFetched,
+      elapsedTimeMs: metadata.elapsedTimeMs,
+    };
+  };
+
   fastify.decorate('epicorExportService', {
     exportAllTables,
     exportTable,
     testQSeatEtabByQuotes,
+    exportQSeatEtabForHardcodedQuote,
   });
 }
 
