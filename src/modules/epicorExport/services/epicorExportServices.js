@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 
 const normalizeTableKey = (table) => String(table || '').trim().toUpperCase();
 
-const sanitizeFileName = (name) => name.replace(/[^a-zA-Z0-9-_]/g, '_');
+const sanitizeFileName = (name) => name.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
 
 async function epicorExportService(fastify, _) {
   const { ENDPOINTS } = fastify.constants;
@@ -87,9 +87,103 @@ async function epicorExportService(fastify, _) {
     };
   };
 
+  const toPositiveInteger = (value, fallback) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  };
+
+  const extractQuoteNum = (quoteRecord) => {
+    const candidates = [
+      quoteRecord?.QuoteHed_QuoteNum,
+      quoteRecord?.QuoteNum,
+      quoteRecord?.quoteNum,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate == null) continue;
+      const normalized = String(candidate).trim();
+      if (normalized) return normalized;
+    }
+
+    return null;
+  };
+
+  const testQSeatEtabByQuotes = async ({ maxQuotes = 25, includeRecords = false, writeFile = true } = {}) => {
+    const quoteLimit = Math.min(toPositiveInteger(maxQuotes, 25), 500);
+
+    const quoteEndpoint = ENDPOINTS.QUOTES;
+    const qseatEndpoint = ENDPOINTS.QSEAT_ETAB;
+
+    if (!quoteEndpoint || !qseatEndpoint) {
+      throw new Error('Missing QUOTES or QSEAT_ETAB endpoint configuration');
+    }
+
+    const quotesResponse = await fastify.epicorAdapter.fetchLimitedRecords(quoteEndpoint, quoteLimit);
+    const quoteNumbers = [...new Set(
+      (quotesResponse.records || [])
+        .map((quote) => extractQuoteNum(quote))
+        .filter(Boolean)
+    )];
+
+    const perQuoteResults = [];
+    let totalQseatRecords = 0;
+
+    for (const quoteNum of quoteNumbers) {
+      try {
+        const { records, metadata } = await fastify.epicorAdapter.fetchRelatedRecords(
+          qseatEndpoint,
+          'QuoteDtl_QuoteNum',
+          quoteNum
+        );
+
+        totalQseatRecords += records.length;
+
+        perQuoteResults.push({
+          quoteNum,
+          totalRecords: metadata.totalRecords,
+          pagesFetched: metadata.pagesFetched,
+          elapsedTimeMs: metadata.elapsedTimeMs,
+          ...(includeRecords ? { records } : {}),
+        });
+      } catch (error) {
+        perQuoteResults.push({
+          quoteNum,
+          error: error.message,
+        });
+      }
+    }
+
+    const payload = {
+      test: 'qseatetab-by-quote',
+      endpoint: qseatEndpoint,
+      exportedAt: new Date().toISOString(),
+      quoteSampleSizeRequested: quoteLimit,
+      quotesFetched: quotesResponse.metadata.totalRecords,
+      quoteNumbersUsed: quoteNumbers.length,
+      totalQseatRecords,
+      successfulQueries: perQuoteResults.filter((item) => !item.error).length,
+      failedQueries: perQuoteResults.filter((item) => item.error).length,
+      results: perQuoteResults,
+    };
+
+    let filePath = null;
+    if (writeFile) {
+      filePath = await writeJsonFile(`QSEAT_ETAB_TEST_${Date.now()}`, payload);
+    }
+
+    return {
+      success: true,
+      exportDir,
+      filePath,
+      ...payload,
+    };
+  };
+
   fastify.decorate('epicorExportService', {
     exportAllTables,
     exportTable,
+    testQSeatEtabByQuotes,
   });
 }
 
