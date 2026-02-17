@@ -193,18 +193,58 @@ async function epicorExportService(fastify, _) {
       throw new TypeError(`Quote number must be numeric. Received: ${quoteNumInput}`);
     }
 
-    const { records, metadata } = await fastify.epicorAdapter.fetchRelatedRecords(
-      qseatEndpoint,
-      'QuoteDtl_QuoteNum',
-      quoteNum
-    );
+    const filterField = 'QuoteDtl_QuoteNum';
+    const filterAttempts = [
+      {
+        mode: 'numeric',
+        filterValue: quoteNum,
+        filter: `${filterField} eq ${quoteNum}`,
+      },
+      {
+        mode: 'quoted-string',
+        filterValue: `'${quoteNum}'`,
+        filter: `${filterField} eq '${quoteNum}'`,
+      },
+    ];
+
+    let response = null;
+    let successfulFilter = null;
+    let successfulMode = null;
+    let lastError = null;
+
+    for (const attempt of filterAttempts) {
+      try {
+        response = await fastify.epicorAdapter.fetchRelatedRecords(
+          qseatEndpoint,
+          filterField,
+          attempt.filterValue
+        );
+        successfulFilter = attempt.filter;
+        successfulMode = attempt.mode;
+        break;
+      } catch (error) {
+        lastError = error;
+        const status = error?.response?.status;
+        const is400 = status === 400 || String(error?.message || '').includes('400 Bad Request');
+        if (!is400 || attempt.mode === 'quoted-string') {
+          throw error;
+        }
+      }
+    }
+
+    if (!response) {
+      throw new Error(`Failed to query QSEAT_ETAB for quote ${quoteNum}: ${lastError?.message || 'Unknown error'}`);
+    }
+
+    const { records, metadata } = response;
 
     const payload = {
       test: 'qseatetab-hardcoded-quote',
       endpoint: qseatEndpoint,
       exportedAt: new Date().toISOString(),
       hardcodedQuoteNum: quoteNum,
-      filter: `QuoteDtl_QuoteNum eq ${quoteNum}`,
+      filter: successfulFilter,
+      filterMode: successfulMode,
       metadata,
       records,
     };
