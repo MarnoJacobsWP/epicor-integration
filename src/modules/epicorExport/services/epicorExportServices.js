@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 const normalizeTableKey = (table) => String(table || '').trim().toUpperCase();
 
 const sanitizeFileName = (name) => name.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
-const HARDCODED_QSEAT_ETAB_QUOTE_NUM = '161251';
+const HARDCODED_QSEAT_ETAB_QUOTE_NUM = 161251;
 
 async function epicorExportService(fastify, _) {
   const { ENDPOINTS } = fastify.constants;
@@ -187,7 +187,11 @@ async function epicorExportService(fastify, _) {
       throw new Error('Missing QSEAT_ETAB endpoint configuration');
     }
 
-    const quoteNum = HARDCODED_QSEAT_ETAB_QUOTE_NUM;
+    const quoteNum = Number.parseInt(HARDCODED_QSEAT_ETAB_QUOTE_NUM, 10);
+    if (!Number.isFinite(quoteNum)) {
+      throw new Error(`HARDCODED_QSEAT_ETAB_QUOTE_NUM must be numeric. Received: ${HARDCODED_QSEAT_ETAB_QUOTE_NUM}`);
+    }
+
     const { records, metadata } = await fastify.epicorAdapter.fetchRelatedRecords(
       qseatEndpoint,
       'QuoteDtl_QuoteNum',
