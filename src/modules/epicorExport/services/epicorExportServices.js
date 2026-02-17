@@ -188,63 +188,29 @@ async function epicorExportService(fastify, _) {
     }
 
     const quoteNumInput = quoteNumOverride ?? HARDCODED_QSEAT_ETAB_QUOTE_NUM;
-    const quoteNum = Number.parseInt(quoteNumInput, 10);
-    if (!Number.isFinite(quoteNum)) {
-      throw new TypeError(`Quote number must be numeric. Received: ${quoteNumInput}`);
+    const quoteNum = String(quoteNumInput).trim();
+    if (!quoteNum) {
+      throw new TypeError('Quote number is required');
     }
 
-    const filterField = 'QuoteDtl_QuoteNum';
-    const filterAttempts = [
-      {
-        mode: 'numeric',
-        filterValue: quoteNum,
-        filter: `${filterField} eq ${quoteNum}`,
-      },
-      {
-        mode: 'quoted-string',
-        filterValue: `'${quoteNum}'`,
-        filter: `${filterField} eq '${quoteNum}'`,
-      },
-    ];
+    const { records: allRecords, metadata: sourceMetadata } = await fastify.epicorAdapter.fetchAllRecords(qseatEndpoint);
 
-    let response = null;
-    let successfulFilter = null;
-    let successfulMode = null;
-    let lastError = null;
+    const records = (allRecords || []).filter((record) => String(record?.QuoteDtl_QuoteNum ?? '').trim() === quoteNum);
 
-    for (const attempt of filterAttempts) {
-      try {
-        response = await fastify.epicorAdapter.fetchRelatedRecords(
-          qseatEndpoint,
-          filterField,
-          attempt.filterValue
-        );
-        successfulFilter = attempt.filter;
-        successfulMode = attempt.mode;
-        break;
-      } catch (error) {
-        lastError = error;
-        const status = error?.response?.status;
-        const is400 = status === 400 || String(error?.message || '').includes('400 Bad Request');
-        if (!is400 || attempt.mode === 'quoted-string') {
-          throw error;
-        }
-      }
-    }
-
-    if (!response) {
-      throw new Error(`Failed to query QSEAT_ETAB for quote ${quoteNum}: ${lastError?.message || 'Unknown error'}`);
-    }
-
-    const { records, metadata } = response;
+    const metadata = {
+      totalRecords: records.length,
+      sourceTotalRecords: sourceMetadata?.totalRecords || 0,
+      pagesFetched: sourceMetadata?.pagesFetched || 0,
+      elapsedTimeMs: sourceMetadata?.elapsedTimeMs || 0,
+    };
 
     const payload = {
       test: 'qseatetab-hardcoded-quote',
       endpoint: qseatEndpoint,
       exportedAt: new Date().toISOString(),
       hardcodedQuoteNum: quoteNum,
-      filter: successfulFilter,
-      filterMode: successfulMode,
+      filter: `QuoteDtl_QuoteNum == ${quoteNum}`,
+      filterMode: 'local-filter-after-fetch-all',
       metadata,
       records,
     };
