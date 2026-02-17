@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 const normalizeTableKey = (table) => String(table || '').trim().toUpperCase();
 
 const sanitizeFileName = (name) => name.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
-const HARDCODED_QSEAT_ETAB_QUOTE_NUM = '167006';
+const HARDCODED_QSEAT_ETAB_QUOTE_NUM = '161247';
 
 async function epicorExportService(fastify, _) {
   const { ENDPOINTS } = fastify.constants;
