@@ -5,7 +5,8 @@ const FIELD_MAPPINGS = [
   { epicor: 'ProdGrup_Description', hubspot: 'prodgrup_description' },
   { epicor: 'QuoteDtl_PartNum', hubspot: 'quotedtl_partnum' },
   { epicor: 'QuoteDtl_LineDesc', hubspot: 'quotedtl_linedesc' },
-  { epicor: 'QuoteDtl_OrderQty', hubspot: 'quotedtl_orderqty', transform: Number },
+  { epicor: 'QuoteDtl_OrderQty', hubspot: 'quantity', transform: Number },
+  { epicor: 'RowIdent', hubspot: 'rowident' },
 ];
 
 /**
@@ -14,6 +15,7 @@ const FIELD_MAPPINGS = [
  * Order/quote numbers are intentionally ignored to dedupe across order/quote syncs.
  */
 const DEDUP_PROPERTIES = ['name', 'hs_sku'];
+const ALLOWED_PROD_GROUPS = new Set(['E-Tables', 'New Seating']);
 
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
@@ -66,6 +68,50 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
+function isEntitySetDescriptor(records) {
+  return records.length === 1
+    && records[0]?.url === 'Data'
+    && records[0]?.kind === 'EntitySet';
+}
+
+async function fetchQSeatEtabRecordsForQuote(fastify, quoteNum) {
+  const endpoint = fastify.constants.ENDPOINTS.QSEAT_ETAB;
+  const baseUrl = String(fastify.config?.BASE_URL || '').replace(/\/+$/, '');
+  const normalizedQuoteNum = String(quoteNum ?? '').trim();
+
+  if (!endpoint || !baseUrl || !normalizedQuoteNum) {
+    throw new Error('Missing endpoint, base URL, or quote number for QSeatEtab fetch');
+  }
+
+  const encodedQuoteNum = encodeURIComponent(normalizedQuoteNum);
+  const candidateUrls = [
+    `${baseUrl}/${endpoint}(68138)/Data?QuoteNum=${encodedQuoteNum}`,
+    `${baseUrl}/${endpoint}(68138)/Data/?QuoteNum=${encodedQuoteNum}`,
+    `${baseUrl}/${endpoint}(68138)/?QuoteNum=${encodedQuoteNum}`,
+  ];
+
+  let lastError = null;
+
+  for (const url of candidateUrls) {
+    try {
+      const response = await fastify.epicorAdapter._makeRequest(url);
+      const records = response?.data?.value || [];
+
+      if (isEntitySetDescriptor(records)) {
+        continue;
+      }
+
+      fastify.log.info(`Fetched ${records.length} QSeatEtab line items for quote ${normalizedQuoteNum} via ${url}`);
+      return records;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) throw lastError;
+  return [];
+}
+
 async function qSeatEtabService(fastify, _) {
   const { HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
@@ -96,13 +142,23 @@ async function qSeatEtabService(fastify, _) {
 
     for (const lineItem of lineItems) {
       const quoteNum = lineItem.QuoteDtl_QuoteNum;
+      const epicorId = lineItem.RowIdent
+        || lineItem.SysRowID
+        || lineItem.QuoteDtl_SysRowID
+        || `${quoteNum}|${lineItem.QuoteDtl_PartNum || ''}|${lineItem.QuoteDtl_LineDesc || ''}|${lineItem.QuoteDtl_OrderQty || ''}`
+        || null;
 
       try {
         const props = transformEpicorToHubSpot(lineItem);
+
+        if (props.prodgrup_description && !ALLOWED_PROD_GROUPS.has(props.prodgrup_description)) {
+          fastify.log.warn(`Invalid prodgrup_description "${props.prodgrup_description}" for quote ${quoteNum}; omitting value`);
+          delete props.prodgrup_description;
+        }
+
         props.name = props.prodgrup_description || 'Unnamed Product';
         props.hs_sku = props.quotedtl_partnum;
         props.description = props.quotedtl_linedesc;
-        props.quantity = 1;
 
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {
@@ -143,11 +199,6 @@ async function qSeatEtabService(fastify, _) {
           results.updated++;
           continue;
         }
-
-        const epicorId = lineItem.SysRowID
-          || lineItem.QuoteDtl_SysRowID
-          || `${quoteNum}|${lineItem.QuoteDtl_PartNum || ''}|${lineItem.QuoteDtl_LineDesc || ''}|${lineItem.QuoteDtl_OrderQty || ''}`
-          || null;
 
         const existingRecord = epicorId
           ? await fastify.lineItemRepository.findByQuery({ epicorId: String(epicorId) })
@@ -302,11 +353,7 @@ async function qSeatEtabService(fastify, _) {
 
   async function syncLineItemsForQuote(quoteNum, dealId) {
     fastify.log.info(`Fetching QSeatEtab line items for quote ${quoteNum}`);
-    const { records } = await fastify.epicorAdapter.fetchRelatedRecords(
-      fastify.constants.ENDPOINTS.QSEAT_ETAB,
-      'QuoteDtl_QuoteNum',
-      quoteNum
-    );
+    const records = await fetchQSeatEtabRecordsForQuote(fastify, quoteNum);
 
     if (!records?.length) {
       fastify.log.info(`No QSeatEtab line items found for quote ${quoteNum}`);
