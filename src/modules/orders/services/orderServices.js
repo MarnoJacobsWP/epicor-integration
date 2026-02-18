@@ -80,10 +80,6 @@ function extractHubspotErrorContext(error) {
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
-  async function infoRecord(data) {
-    return await fastify.orderRepository.findByIdProperty(data);
-  }
-
   async function updateDataBase(filter, data) {
     return await fastify.orderRepository.updateDatabase(filter, data);
   }
@@ -155,28 +151,31 @@ async function orderService(fastify, _) {
           source: 'EpicorOrders',
         };
 
-        let existRecord = await infoRecord(query);
+        let existRecord = null;
 
-        if (!existRecord) {
-          try {
-            const searchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('orderhed_ordernum', [orderNum])
-            );
-            existRecord = searchData.results?.[0] || null;
-          } catch (searchError) {
-            existRecord = null;
-          }
+        try {
+          const searchData = await fastify.backoff(() =>
+            fastify.hubspotAdapter.searchDealsByProperty('orderhed_ordernum', [orderNum])
+          );
+          existRecord = searchData.results?.[0] || null;
+        } catch (searchError) {
+          fastify.log.warn(`Order ${orderNum} deal search by order number failed: ${searchError.message}`);
+          existRecord = null;
         }
 
-        if (!existRecord && quoteNum) {
+        if (quoteNum) {
           try {
             const quoteSearch = await fastify.backoff(() =>
               fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
             );
             if (quoteSearch.results?.[0]) {
-              existRecord = quoteSearch.results[0];
-              usedQuoteDeal = true;
-              fastify.log.info(`Order ${orderNum} matched existing quote deal ${existRecord.id} for quote ${quoteNum}`);
+              const quoteDeal = quoteSearch.results[0];
+              const existingDealId = existRecord?.hubspotId || existRecord?.id;
+              if (!existingDealId || String(existingDealId) !== String(quoteDeal.id)) {
+                existRecord = quoteDeal;
+                usedQuoteDeal = true;
+                fastify.log.info(`Order ${orderNum} matched existing quote deal ${existRecord.id} for quote ${quoteNum}`);
+              }
             }
           } catch (searchError) {
             fastify.log.warn(`Order ${orderNum} quote match search failed: ${searchError.message}`);

@@ -86,6 +86,7 @@ class HubspotAdapter {
     this.logger = logger;
     this.maxRetries = constants?.MAX_RETRIES || 3;
     this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
+    this.propertyOptionsCache = new Map();
     
     if (!this.token) {
       this.logger.warn('HubSpot access token is empty');
@@ -131,6 +132,7 @@ class HubspotAdapter {
           const { errorMessage, errorDetails } = extractHubspotErrorDetails(error?.response?.data);
           const messageSuffix = errorMessage ? ` - ${errorMessage}` : '';
           const message = `HubSpot request failed: ${method.toUpperCase()} ${url} - ${status || 'unknown'} ${statusText}${messageSuffix}`;
+          const correlationSuffix = correlationId ? ` (correlationId: ${correlationId})` : '';
           const requestBody = safeStringify(config?.data);
           this.logger.error(
             {
@@ -142,9 +144,12 @@ class HubspotAdapter {
               errorDetails,
               requestBody,
             },
-            `${message}${correlationId ? ` (correlationId: ${correlationId})` : ''}`,
+            `${message}${correlationSuffix}`,
           );
-          throw new Error(message, { cause: error });
+          const wrappedError = new Error(message, { cause: error });
+          wrappedError.response = error?.response;
+          wrappedError.status = status;
+          throw wrappedError;
         }
 
         const delayMs = computeRetryDelay(attempt, retryAfterMs);
@@ -156,6 +161,33 @@ class HubspotAdapter {
     }
 
     throw new Error(`HubSpot request failed after ${this.maxRetries} retries.`);
+  }
+
+  async getPropertyOptions(objectType, propertyName) {
+    if (!isNonEmptyString(objectType) || !isNonEmptyString(propertyName)) {
+      throw new Error('getPropertyOptions requires objectType and propertyName');
+    }
+
+    const cacheKey = `${objectType}:${propertyName}`;
+    const cached = this.propertyOptionsCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.fetchedAt < 5 * 60 * 1000) {
+      return cached.options;
+    }
+
+    const response = await this._makeRequest(
+      'GET',
+      `/crm/v3/properties/${objectType}/${propertyName}`,
+    );
+
+    const options = Array.isArray(response?.data?.options)
+      ? response.data.options
+        .map((option) => option?.value)
+        .filter((value) => isNonEmptyString(value))
+      : [];
+
+    this.propertyOptionsCache.set(cacheKey, { fetchedAt: now, options });
+    return options;
   }
 
   async batchUpsertCompanies(batchData, idProperty = 'customer_custid_') {

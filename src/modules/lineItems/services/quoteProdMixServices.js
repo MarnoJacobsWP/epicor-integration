@@ -92,29 +92,7 @@ async function quoteProdMixService(fastify, _) {
   }
 
   async function appendDealProdGrupValue(dealId, prodGrupValue) {
-    if (!dealId || !prodGrupValue) return;
-
-    const propertyName = 'prodgrup_character01';
-    try {
-      const normalizedValue = toSingleLineText(prodGrupValue);
-      if (!normalizedValue) return;
-
-      const deal = await fastify.backoff(() =>
-        fastify.hubspotAdapter.getDealById({ dealId, properties: [propertyName] })
-      );
-
-      const existing = deal?.properties?.[propertyName] || '';
-      if (normalizedValue !== String(existing).trim()) {
-        await fastify.backoff(() =>
-          fastify.hubspotAdapter.updateDeal({
-            dealId,
-            properties: { [propertyName]: normalizedValue }
-          })
-        );
-      }
-    } catch (error) {
-      fastify.log.warn(`Deal ${dealId} - Failed to append prodgrup value "${prodGrupValue}": ${error.message}`);
-    }
+    return;
   }
 
   /**
@@ -152,9 +130,7 @@ async function quoteProdMixService(fastify, _) {
         }
 
         const epicorId = getEpicorId(lineItem, quoteNum);
-        const existingRecord = epicorId
-          ? await fastify.lineItemRepository.findByQuery({ epicorId: String(epicorId) })
-          : null;
+        const existingRecord = null;
 
         // Property-based dedup: skip if all properties match an existing line item
         const match = findMatchingLineItem(existingLineItems, cleanProps);

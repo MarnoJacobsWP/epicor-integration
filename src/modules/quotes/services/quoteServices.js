@@ -7,17 +7,6 @@ const toMidnightUTC = (v) => {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 };
 
-const toValidSalesRep = (v) => {
-  if (!v) return 'Unknown Option';
-  const validOptions = [
-    'House', 'Mike Kilcoyne and Associates', 'Phillips Contract Group, LLC', 'CYA',
-    'Reagan Penny', 'Dan Martin', 'Murphy Associates', 'Bruce Longhino Group',
-    'Morgan Associates', 'Mike Fabionar', 'Ginger Grant', 'Lauren East',
-    'Elizabeth Gerber', 'Jennifer Gates', 'John Parrish', 'Unknown Option'
-  ];
-  return validOptions.includes(v) ? v : 'Unknown Option';
-};
-
 const FIELD_MAPPINGS = [
   { epicor: 'QuoteHed_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
   { epicor: 'QuoteHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },
@@ -28,7 +17,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'QuoteHed_Character08', hubspot: 'orderhed_characternh' },
   { epicor: 'QuoteHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
   { epicor: 'QuoteHed_Character10', hubspot: 'quotehed_character10' },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: toValidSalesRep },
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: (v) => v ? String(v).trim() : null },
   { epicor: 'QuoteHed_ShortChar01', hubspot: 'quotehed_shortchar01' },
   { epicor: 'QuoteHed_ShortChar02', hubspot: 'quotehed_shortchar02' },
   { epicor: 'QuoteHed_ShortChar03', hubspot: 'orderhed_shortchar03' },
@@ -92,9 +81,26 @@ function extractHubspotErrorContext(error) {
 
 async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
+  const UNKNOWN_OPTION = 'Unknown Option';
 
-  async function infoRecord(data) {
-    return await fastify.quoteRepository.findByIdProperty(data);
+  async function getSalesRepOptions() {
+    try {
+      const options = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getPropertyOptions('deals', 'salesrep_name')
+      );
+      const set = new Set(options || []);
+      set.add(UNKNOWN_OPTION);
+      return set;
+    } catch (error) {
+      fastify.log.warn(`Failed loading HubSpot options for salesrep_name: ${error.message}`);
+      return new Set([UNKNOWN_OPTION]);
+    }
+  }
+
+  function normalizeSalesRepValue(value, optionsSet) {
+    const clean = String(value || '').trim();
+    if (!clean) return UNKNOWN_OPTION;
+    return optionsSet.has(clean) ? clean : UNKNOWN_OPTION;
   }
 
   async function updateDataBase(filter, data) {
@@ -126,6 +132,7 @@ async function quoteService(fastify, _) {
 
   async function processQuotesIndividually(quotes, results) {
     fastify.log.info(`Starting individual processing for ${quotes.length} quotes...`);
+    const salesRepOptions = await getSalesRepOptions();
     
     for (const quote of quotes) {
       const quoteNum = quote.QuoteHed_QuoteNum;
@@ -137,19 +144,17 @@ async function quoteService(fastify, _) {
           source: 'EpicorQuotes',
         };
 
-        let existRecord = await infoRecord(query);
+        let existRecord = null;
 
-        if (!existRecord) {
-          try {
-            const searchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
-            );
-            existRecord = searchData.results?.[0] || null;
-            fastify.log.info(`Search completed for quote ${quoteNum}: ${existRecord ? 'Found existing deal ' + existRecord.id : 'No existing deal found'}`);
-          } catch (searchError) {
-            fastify.log.error(`Search failed for quote ${quoteNum}: ${searchError.message} [${searchError.response?.status || 'no-status'}]`);
-            existRecord = null;
-          }
+        try {
+          const searchData = await fastify.backoff(() =>
+            fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+          );
+          existRecord = searchData.results?.[0] || null;
+          fastify.log.info(`Search completed for quote ${quoteNum}: ${existRecord ? 'Found existing deal ' + existRecord.id : 'No existing deal found'}`);
+        } catch (searchError) {
+          fastify.log.error(`Search failed for quote ${quoteNum}: ${searchError.message} [${searchError.response?.status || 'no-status'}]`);
+          existRecord = null;
         }
 
         if (!existRecord) {
@@ -168,6 +173,7 @@ async function quoteService(fastify, _) {
         }
 
         props = transformEpicorToHubSpot(quote);
+        props.salesrep_name = normalizeSalesRepValue(props.salesrep_name, salesRepOptions);
         props.dealname = generateDealName(quote);
         const normalizedConclusion = String(props.task_conclusion || '').trim().toUpperCase();
         const isWon = normalizedConclusion === 'WIN';

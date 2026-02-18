@@ -200,9 +200,7 @@ async function qSeatEtabService(fastify, _) {
           continue;
         }
 
-        const existingRecord = epicorId
-          ? await fastify.lineItemRepository.findByQuery({ epicorId: String(epicorId) })
-          : null;
+        const existingRecord = null;
 
         if (existingRecord?.hubspotId) {
           const lineItemId = existingRecord.hubspotId;

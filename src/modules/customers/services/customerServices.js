@@ -1,21 +1,6 @@
 import fp from 'fastify-plugin';
 import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
 
-const VALID_SALESREP_OPTIONS = new Set([
-  'CYA', 'House', 'Murphy Associates', 'Mike Kilcoyne and Associates', 
-  'Reagan Penny', 'Phillips Contract Group, LLC', 'Dan Martin', 'Ginger Grant',
-  'Bruce Longhino Group', 'Mike Fabionar', 'Morgan Associates', 
-  'Heather Huddleston Interiors', 'Lauren East', 'Kevin Klieforth',
-  'Jennifer Gates', 'Bobbie Zimmer', 'Elizabeth Gerber', 
-  'Stephenson Toelkes Associates', 'John Parrish', 'Madison Mcsherry', 'Barry Holley', 'Unknown Option'
-]);
-
-const toValidSalesRep = (salesRepName) => {
-  if (!salesRepName?.trim()) return 'Unknown Option';
-  const cleanName = salesRepName.trim();
-  return VALID_SALESREP_OPTIONS.has(cleanName) ? cleanName : 'Unknown Option';
-};
-
 const FIELD_MAPPINGS = [
   { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
   { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: padCustNum }, //customer_custid in prod - customer_custid_ in dev
@@ -26,8 +11,8 @@ const FIELD_MAPPINGS = [
   { epicor: 'Customer_City', hubspot: 'city', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
   { epicor: 'Customer_State', hubspot: 'hs_state_code', transform: (v) => v ? String(v).trim().substring(0, 50) : null },
   { epicor: 'Customer_Zip', hubspot: 'zip', transform: (v) => v ? String(v).trim().substring(0, 20) : null },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep', transform: toValidSalesRep }, //salesrep_name in production - salesrep in dev
-  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: toValidSalesRep }, //salresrep in production - salesrepa_name in dev
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep', transform: (v) => v ? String(v).trim() : null }, //salesrep_name in production - salesrep in dev
+  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: (v) => v ? String(v).trim() : null }, //salresrep in production - salesrepa_name in dev
   { epicor: 'CustGrup_GroupDesc', hubspot: 'custgrup_groupdesc', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
   { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
 ];
@@ -50,6 +35,36 @@ async function customerService(fastify, _) {
   const { ENDPOINTS, BATCH_SIZES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const BATCH_SIZE = BATCH_SIZES.CUSTOMERS || 100;
   const UNIQUE_PROPERTY = 'customer_custid_';
+  const UNKNOWN_OPTION = 'Unknown Option';
+
+  async function getValidOptions(propertyName) {
+    try {
+      const options = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getPropertyOptions('companies', propertyName)
+      );
+      return new Set(options || []);
+    } catch (error) {
+      fastify.log.warn(`Failed loading HubSpot options for ${propertyName}: ${error.message}`);
+      return new Set();
+    }
+  }
+
+  async function getSalesRepOptionSets() {
+    const [salesrep, salesrepa] = await Promise.all([
+      getValidOptions('salesrep'),
+      getValidOptions('salesrepa_name'),
+    ]);
+
+    salesrep.add(UNKNOWN_OPTION);
+    salesrepa.add(UNKNOWN_OPTION);
+    return { salesrep, salesrepa };
+  }
+
+  function normalizeSalesRepValue(value, optionsSet) {
+    const clean = String(value || '').trim();
+    if (!clean) return UNKNOWN_OPTION;
+    return optionsSet.has(clean) ? clean : UNKNOWN_OPTION;
+  }
 
   async function infoRecord(data) {
     return await fastify.customerRepository.findByIdProperty(data);
@@ -80,6 +95,8 @@ async function customerService(fastify, _) {
     const batchData = [];
     const failedCustomers = [];
     
+    const salesRepOptions = await getSalesRepOptionSets();
+
     for (const customer of customers) {
       try {
         const custIdRaw = customer.Customer_CustID || customer.Customer_CustNum;
@@ -105,6 +122,8 @@ async function customerService(fastify, _) {
         }
 
         let properties = transformEpicorToHubSpot(customer);
+        properties.salesrep = normalizeSalesRepValue(properties.salesrep, salesRepOptions.salesrep);
+        properties.salesrepa_name = normalizeSalesRepValue(properties.salesrepa_name, salesRepOptions.salesrepa);
         
         if (!properties.name || properties.name.trim() === '') {
           fastify.log.warn(`Customer ${custIdStr} has empty name, using ID as name`);
@@ -260,6 +279,7 @@ async function customerService(fastify, _) {
 
   async function processCustomersIndividually(customers, results) {
     fastify.log.info(`Starting individual processing for ${customers.length} customers...`);
+    const salesRepOptions = await getSalesRepOptionSets();
     
     for (const customer of customers) {
       const custIdRaw = customer.Customer_CustID || customer.Customer_CustNum;
@@ -277,32 +297,33 @@ async function customerService(fastify, _) {
           source: 'EpicorCustomers',
         };
 
-        let existRecord = await infoRecord(query);
+        let existRecord = null;
 
-        if (!existRecord) {
-          try {
-            const searchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchCompanies({
-                body: {
-                  filterGroups: [{ 
-                    filters: [{ 
-                      propertyName: UNIQUE_PROPERTY,
-                      operator: 'EQ', 
-                      value: String(custId) 
-                    }] 
-                  }],
-                  limit: 1,
-                  properties: [UNIQUE_PROPERTY, 'name'],
-                },
-              })
-            );
-            existRecord = searchData.results?.[0] || null;
-          } catch (searchError) {
-            existRecord = null;
-          }
+        try {
+          const searchData = await fastify.backoff(() =>
+            fastify.hubspotAdapter.searchCompanies({
+              body: {
+                filterGroups: [{ 
+                  filters: [{ 
+                    propertyName: UNIQUE_PROPERTY,
+                    operator: 'EQ', 
+                    value: String(custId) 
+                  }] 
+                }],
+                limit: 1,
+                properties: [UNIQUE_PROPERTY, 'name'],
+              },
+            })
+          );
+          existRecord = searchData.results?.[0] || null;
+        } catch (searchError) {
+          fastify.log.warn(`Customer ${custId} company search failed: ${searchError.message}`);
+          existRecord = null;
         }
 
         const props = transformEpicorToHubSpot(customer);
+        props.salesrep = normalizeSalesRepValue(props.salesrep, salesRepOptions.salesrep);
+        props.salesrepa_name = normalizeSalesRepValue(props.salesrepa_name, salesRepOptions.salesrepa);
         
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {
