@@ -77,6 +77,10 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
+function isDuplicateKeyError(error) {
+  return error?.code === 11000 || String(error?.message || '').includes('E11000 duplicate key error');
+}
+
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
@@ -86,6 +90,20 @@ async function orderService(fastify, _) {
 
   async function createDataBase(data) {
     return await fastify.orderRepository.insertDatabase(data);
+  }
+
+  async function createOrUpdateDataBase(data) {
+    try {
+      return await createDataBase(data);
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) throw error;
+
+      await updateDataBase(
+        { epicorId: data.epicorId, source: data.source },
+        data,
+      );
+      return { upserted: true };
+    }
   }
 
   async function deleteDataBase(filter) {
@@ -243,7 +261,7 @@ async function orderService(fastify, _) {
 
             fastify.log.info(`Order ${orderNum} recreated in HubSpot ${newDealId}`);
 
-            await createDataBase({
+            await createOrUpdateDataBase({
               hubspotId: newDealId,
               epicorId: order.OrderHed_SysRowID,
               source: 'EpicorOrders',
@@ -300,7 +318,7 @@ async function orderService(fastify, _) {
           if (existRecord?.hubspotId) {
             await updateDataBase(query, { action, timestamp: new Date() });
           } else {
-            await createDataBase({
+            await createOrUpdateDataBase({
               hubspotId: dealId,
               epicorId: order.OrderHed_SysRowID,
               source: 'EpicorOrders',
@@ -357,7 +375,7 @@ async function orderService(fastify, _) {
 
           fastify.log.info(`Order ${orderNum} created in HubSpot ${dealId}`);
 
-          await createDataBase({
+          await createOrUpdateDataBase({
             hubspotId: dealId,
             epicorId: order.OrderHed_SysRowID,
             source: 'EpicorOrders',

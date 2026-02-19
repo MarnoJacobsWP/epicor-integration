@@ -86,11 +86,32 @@ class HubspotAdapter {
     this.logger = logger;
     this.maxRetries = constants?.MAX_RETRIES || 3;
     this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
+    this.minRequestIntervalMs = Number(config?.HUBSPOT_MIN_REQUEST_INTERVAL_MS || 125);
+    this.requestQueue = null;
+    this.nextRequestAt = 0;
     this.propertyOptionsCache = new Map();
     
     if (!this.token) {
       this.logger.warn('HubSpot access token is empty');
     }
+  }
+
+  async _scheduleRequest(fn) {
+    const run = async () => {
+      const now = Date.now();
+      const waitMs = Math.max(0, this.nextRequestAt - now);
+      if (waitMs > 0) {
+        await sleep(waitMs);
+      }
+
+      this.nextRequestAt = Date.now() + this.minRequestIntervalMs;
+      return await fn();
+    };
+
+    const queue = this.requestQueue || Promise.resolve();
+    const scheduled = queue.then(run, run);
+    this.requestQueue = scheduled.then(() => undefined, () => undefined);
+    return await scheduled;
   }
 
   async _makeRequest(method, url, data = null, options = {}) {
@@ -115,7 +136,7 @@ class HubspotAdapter {
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await this.client(config);
+        const response = await this._scheduleRequest(() => this.client(config));
         if (!response?.data) {
           throw new Error('HubSpot response missing data');
         }

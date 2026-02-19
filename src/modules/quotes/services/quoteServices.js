@@ -79,6 +79,10 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
+function isDuplicateKeyError(error) {
+  return error?.code === 11000 || String(error?.message || '').includes('E11000 duplicate key error');
+}
+
 async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const UNKNOWN_OPTION = 'Unknown Option';
@@ -109,6 +113,20 @@ async function quoteService(fastify, _) {
 
   async function createDataBase(data) {
     return await fastify.quoteRepository.insertDatabase(data);
+  }
+
+  async function createOrUpdateDataBase(data) {
+    try {
+      return await createDataBase(data);
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) throw error;
+
+      await updateDataBase(
+        { epicorId: data.epicorId, source: data.source },
+        data,
+      );
+      return { upserted: true };
+    }
   }
 
   async function deleteDataBase(filter) {
@@ -235,7 +253,7 @@ async function quoteService(fastify, _) {
 
             fastify.log.info(`Quote ${quoteNum} recreated in HubSpot ${newDealId}`);
 
-            await createDataBase({
+            await createOrUpdateDataBase({
               hubspotId: newDealId,
               epicorId: quote.QuoteHed_SysRowID,
               source: 'EpicorQuotes',
@@ -293,7 +311,7 @@ async function quoteService(fastify, _) {
           if (existRecord?.hubspotId) {
             await updateDataBase(query, { action, timestamp: new Date() });
           } else {
-            await createDataBase({
+            await createOrUpdateDataBase({
               hubspotId: dealId,
               epicorId: quote.QuoteHed_SysRowID,
               source: 'EpicorQuotes',
@@ -346,7 +364,7 @@ async function quoteService(fastify, _) {
 
           fastify.log.info(`Quote ${quoteNum} created in HubSpot ${dealId}`);
 
-          await createDataBase({
+          await createOrUpdateDataBase({
             hubspotId: dealId,
               epicorId: quote.QuoteHed_SysRowID,
             source: 'EpicorQuotes',
