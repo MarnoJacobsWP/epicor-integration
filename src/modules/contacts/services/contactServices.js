@@ -40,10 +40,6 @@ async function contactService(fastify, _) {
     return await fastify.contactRepository.insertDatabase(data);
   }
 
-  async function deleteDataBase(filter) {
-    return await fastify.contactRepository.deleteDatabase(filter);
-  }
-
   async function upsertContactRecord({ contact, contactId, email, action }) {
     const query = {
       epicorId: contact.RowIdent,

@@ -36,14 +36,6 @@ async function errorHandler(fastify, opts) {
     fastify.log.warn('NotFoundHandler already set, skipping...');
   }
 
-  process.on('uncaughtException', (error) => {
-    fastify.log.fatal({ error }, 'Uncaught exception');
-    setTimeout(() => process.exit(1), 1000);
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    fastify.log.error({ reason }, 'Unhandled promise rejection');
-  });
 }
 
 export default fp(errorHandler, { name: 'errorHandler' });

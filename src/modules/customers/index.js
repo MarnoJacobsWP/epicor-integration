@@ -8,14 +8,14 @@ export default fp(
       dir: join(import.meta.url, 'repositories'),
       dirNameRoutePrefix: false,
       indexPattern: /^customerRepository.js$/i,
-      options: Object.assign({}, opts),
+      options: { ...opts },
     });
 
     await fastify.register(AutoLoad, {
       dir: join(import.meta.url, 'services'),
       dirNameRoutePrefix: false,
       indexPattern: /.*Services(\.js|\.cjs)$/i,
-      options: Object.assign({}, opts),
+      options: { ...opts },
     });
 
     fastify.post('/syncCustomers', async (request, reply) => {
@@ -32,7 +32,8 @@ export default fp(
       }
     });
 
-    fastify.get('/debug/customer/:customerId', async (request, reply) => {
+    if (process.env.NODE_ENV !== 'production') {
+      fastify.get('/debug/customer/:customerId', async (request, reply) => {
       try {
         const { customerId } = request.params;
         const dateString = fastify.utils?.getSyncDate(fastify.constants.SYNC_INTERVAL) || new Date().toISOString();
@@ -79,6 +80,7 @@ export default fp(
         });
       }
     });
+    }
 
     fastify.log.info('Customers module loaded');
   },

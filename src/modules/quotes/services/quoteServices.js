@@ -148,6 +148,29 @@ async function quoteService(fastify, _) {
     );
   }
 
+  async function associateQuoteToCompany(quoteNum, custNumRaw, dealId) {
+    try {
+      const custNum = custNumRaw ? padCustNum(custNumRaw) : null;
+      if (!custNum) {
+        fastify.log.debug(`Quote ${quoteNum}: No customer number available for company association`);
+        return;
+      }
+
+      const companySearch = await fastify.backoff(() =>
+        fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+      );
+
+      if (companySearch.results?.[0]?.id) {
+        const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
+        fastify.log.debug(`Quote ${quoteNum}: Deal/company association ${assocResult?.skipped ? 'already exists' : 'created'}`);
+      } else {
+        fastify.log.debug(`Quote ${quoteNum}: No company found for customer_custnum=${custNum}`);
+      }
+    } catch (associationError) {
+      fastify.log.warn(`Quote ${quoteNum}: Failed to associate deal ${dealId} to company: ${associationError.message}`);
+    }
+  }
+
   async function processQuotesIndividually(quotes, results) {
     fastify.log.info(`Starting individual processing for ${quotes.length} quotes...`);
     const salesRepOptions = await getSalesRepOptions();
@@ -274,27 +297,7 @@ async function quoteService(fastify, _) {
               fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
             }
 
-            try {
-              const custNum = quote.QuoteHed_CustNum ? padCustNum(quote.QuoteHed_CustNum) : null;
-              fastify.log.info(`Quote ${quoteNum} CREATE - Raw CustNum: ${quote.QuoteHed_CustNum}, Padded: ${custNum}`);
-              if (custNum) {
-                const companySearch = await fastify.backoff(() =>
-                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-                );
-                fastify.log.info(`Quote ${quoteNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
-                if (companySearch.results?.[0]?.id) {
-                  fastify.log.info(`Quote ${quoteNum} CREATE - Attempting to associate deal ${newDealId} with company ${companySearch.results[0].id} using type 5`);
-                  const assocResult = await ensureDealCompanyAssociation(newDealId, companySearch.results[0].id);
-                  fastify.log.info(`Quote ${quoteNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
-                } else {
-                  fastify.log.warn(`Quote ${quoteNum} CREATE - No company found with customer_custnum=${custNum}`);
-                }
-              } else {
-                fastify.log.warn(`Quote ${quoteNum} CREATE - No custNum (QuoteHed_CustNum was empty)`);
-              }
-            } catch (associationError) {
-              fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
-            }
+            await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, newDealId);
 
             results.created++;
             continue;
@@ -333,27 +336,7 @@ async function quoteService(fastify, _) {
             fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
           }
 
-          try {
-            const custNum = quote.QuoteHed_CustNum ? padCustNum(quote.QuoteHed_CustNum) : null;
-            fastify.log.info(`Quote ${quoteNum} UPDATE - Raw CustNum: ${quote.QuoteHed_CustNum}, Padded: ${custNum}`);
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              fastify.log.info(`Quote ${quoteNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
-              if (companySearch.results?.[0]?.id) {
-                fastify.log.info(`Quote ${quoteNum} UPDATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
-                fastify.log.info(`Quote ${quoteNum} UPDATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
-              } else {
-                fastify.log.warn(`Quote ${quoteNum} UPDATE - No company found with customer_custnum=${custNum}`);
-              }
-            } else {
-              fastify.log.warn(`Quote ${quoteNum} UPDATE - No custNum (QuoteHed_CustNum was empty)`);
-            }
-          } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} UPDATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
-          }
+          await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
 
           results.updated++;
         } else {
@@ -366,7 +349,7 @@ async function quoteService(fastify, _) {
 
           await createOrUpdateDataBase({
             hubspotId: dealId,
-              epicorId: quote.QuoteHed_SysRowID,
+            epicorId: quote.QuoteHed_SysRowID,
             source: 'EpicorQuotes',
             quoteNum: quoteNum,
             action: 'create',
@@ -385,27 +368,7 @@ async function quoteService(fastify, _) {
             fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
           }
 
-          try {
-            const custNum = quote.QuoteHed_CustNum ? padCustNum(quote.QuoteHed_CustNum) : null;
-            fastify.log.info(`Quote ${quoteNum} CREATE - Raw CustNum: ${quote.QuoteHed_CustNum}, Padded: ${custNum}`);
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              fastify.log.info(`Quote ${quoteNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
-              if (companySearch.results?.[0]?.id) {
-                fastify.log.info(`Quote ${quoteNum} CREATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
-                fastify.log.info(`Quote ${quoteNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
-              } else {
-                fastify.log.warn(`Quote ${quoteNum} CREATE - No company found with customer_custnum=${custNum}`);
-              }
-            } else {
-              fastify.log.warn(`Quote ${quoteNum} CREATE - No custNum (QuoteHed_CustNum was empty)`);
-            }
-          } catch (associationError) {
-            fastify.log.error(`Quote ${quoteNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
-          }
+          await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
 
           results.created++;
         }

@@ -94,6 +94,10 @@
     "HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL": {
       "type": "integer",
       "default": 20
+    },
+    "HUBSPOT_MIN_REQUEST_INTERVAL_MS": {
+      "type": "integer",
+      "default": 125
     }
   }
 }

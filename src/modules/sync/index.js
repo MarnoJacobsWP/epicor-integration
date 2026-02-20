@@ -8,14 +8,14 @@ export default fp(
       dir: join(import.meta.url, 'repositories'),
       dirNameRoutePrefix: false,
       indexPattern: /^syncRepository.js$/i,
-      options: Object.assign({}, opts),
+      options: { ...opts },
     });
 
     await fastify.register(AutoLoad, {
       dir: join(import.meta.url, 'services'),
       dirNameRoutePrefix: false,
       indexPattern: /.*Services(\.js|\.cjs)$/i,
-      options: Object.assign({}, opts),
+      options: { ...opts },
     });
 
     fastify.get('/sync/status', async (request, reply) => {

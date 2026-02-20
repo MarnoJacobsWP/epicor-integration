@@ -17,20 +17,20 @@ const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_Character08', hubspot: 'orderhed_characternh' },
   { epicor: 'OrderHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
   { epicor: 'SalesRep_Name', hubspot: 'salesrep_name' },
-  { epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' }, //quotehed_shortchar01 in prod - orderhed_shortchar01 in dev
-  { epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' }, //quotehed_shortchar02 in prod - orderhed_shortchar02 in dev
+  { epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' },
+  { epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' },
   { epicor: 'OrderHed_ShortChar03', hubspot: 'orderhed_shortchar03' },
-  { epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' }, //quotehed_shortchar04 in prod - orderhed_shortchar04 in dev
+  { epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' },
   { epicor: 'OrderHed_UserChar3', hubspot: 'orderhed_userchar3' },
   { epicor: 'OrderHed_Character01', hubspot: 'orderhed_character01' },
   { epicor: 'OrderHed_ShortChar05', hubspot: 'orderhed_shortchar05' },
   { epicor: 'OrderHed_ShortChar06', hubspot: 'orderhed_shortchar06' },
   { epicor: 'OrderHed_ShortChar07', hubspot: 'orderhed_shortchar07' },
-  { epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' }, //quotehed_character04 in prod - orderhed_character04 in dev
-  { epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' }, //quotehed_character05 in prod - orderhed_character05 in dev
-  { epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' }, //quotehed_character06 in prod - orderhed_character06 in dev
-  { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' }, //quotehed_character02 in prod - orderhed_character02 in dev
-  { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' }, //quotehed_character03 in prod - orderhed_character03 in dev
+  { epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' },
+  { epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' },
+  { epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' },
+  { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' },
+  { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' },
   { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
   { epicor: 'OrderHed_SysRowID', hubspot: 'rowident' },
 ];
@@ -132,7 +132,7 @@ async function orderService(fastify, _) {
       if (HUBSPOT_DEAL_STAGES.CLOSED_WON) properties.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
 
       if (Object.keys(properties).length === 0) {
-        fastify.log.warn(`Skipping quote update for ${quoteNum}: missing HUBSPOT_PIPELINE_QUOTES or HUBSPOT_DEAL_STAGE_CLOSED_WON`);
+        fastify.log.warn(`Skipping quote update for ${quoteNum}: missing pipeline or deal stage configuration`);
       } else {
         await fastify.backoff(() =>
           fastify.hubspotAdapter.updateDeal({
@@ -150,7 +150,45 @@ async function orderService(fastify, _) {
         fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
       }
     } catch (quoteUpdateError) {
-      fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}: ${quoteUpdateError.response}: ${quoteUpdateError.response?.data}: ${quoteUpdateError.response?.data?.message}`);
+      fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
+    }
+  }
+
+  async function associateOrderToCompany(orderNum, custNumRaw, dealId) {
+    try {
+      const custNum = custNumRaw ? padCustNum(custNumRaw) : null;
+      if (!custNum) {
+        fastify.log.debug(`Order ${orderNum}: No customer number available for company association`);
+        return;
+      }
+
+      const companySearch = await fastify.backoff(() =>
+        fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
+      );
+
+      if (companySearch.results?.[0]?.id) {
+        const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
+        fastify.log.debug(`Order ${orderNum}: Deal/company association ${assocResult?.skipped ? 'already exists' : 'created'}`);
+      } else {
+        fastify.log.debug(`Order ${orderNum}: No company found for customer_custnum=${custNum}`);
+      }
+    } catch (associationError) {
+      fastify.log.warn(`Order ${orderNum}: Failed to associate deal ${dealId} to company: ${associationError.message}`);
+    }
+  }
+
+  async function checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal) {
+    if (!quoteNum || usedQuoteDeal) return;
+
+    try {
+      const quoteSearchData = await fastify.backoff(() =>
+        fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+      );
+      if (quoteSearchData.results?.[0]?.id) {
+        await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
+      }
+    } catch (error) {
+      fastify.log.warn(`Order ${orderNum}: Failed to check matching quote ${quoteNum}: ${error.message}`);
     }
   }
 
@@ -276,37 +314,8 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
             }
 
-            try {
-              const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
-              fastify.log.info(`Order ${orderNum} CREATE - Raw CustNum: ${order.OrderHed_CustNum}, Padded: ${custNum}`);
-              if (custNum) {
-                const companySearch = await fastify.backoff(() =>
-                  fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-                );
-                fastify.log.info(`Order ${orderNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
-                if (companySearch.results?.[0]?.id) {
-                  fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate deal ${newDealId} with company ${companySearch.results[0].id} using type 5`);
-                  const assocResult = await ensureDealCompanyAssociation(newDealId, companySearch.results[0].id);
-                  fastify.log.info(`Order ${orderNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
-                } else {
-                  fastify.log.warn(`Order ${orderNum} CREATE - No company found with customer_custnum=${custNum}`);
-                }
-              } else {
-                fastify.log.warn(`Order ${orderNum} CREATE - No custNum (OrderHed_CustNum was empty)`);
-              }
-            } catch (associationError) {
-              fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
-            }
-
-            // Check if this order has a matching quote and update it to Closed Won
-            if (quoteNum && !usedQuoteDeal) {
-              const quoteSearchData = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
-              );
-              if (quoteSearchData.results?.[0]?.id) {
-                await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
-              }
-            }
+            await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
+            await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
             results.created++;
             continue;
@@ -334,37 +343,8 @@ async function orderService(fastify, _) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
 
-          try {
-            const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
-            fastify.log.info(`Order ${orderNum} UPDATE - Raw CustNum: ${order.OrderHed_CustNum}, Padded: ${custNum}`);
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              fastify.log.info(`Order ${orderNum} UPDATE - Company search results: ${companySearch.results?.length || 0}`);
-              if (companySearch.results?.[0]?.id) {
-                fastify.log.info(`Order ${orderNum} UPDATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
-                fastify.log.info(`Order ${orderNum} UPDATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
-              } else {
-                fastify.log.warn(`Order ${orderNum} UPDATE - No company found with customer_custnum=${custNum}`);
-              }
-            } else {
-              fastify.log.warn(`Order ${orderNum} UPDATE - No custNum (OrderHed_CustNum was empty)`);
-            }
-          } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} UPDATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
-          }
-
-          // Check if this order has a matching quote and update it to Closed Won
-          if (quoteNum && !usedQuoteDeal) {
-            const quoteSearchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
-            );
-            if (quoteSearchData.results?.[0]?.id) {
-              await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
-            }
-          }
+          await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
+          await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
           results.updated++;
         } else {
@@ -390,36 +370,8 @@ async function orderService(fastify, _) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
 
-          try {
-            const custNum = order.OrderHed_CustNum ? padCustNum(order.OrderHed_CustNum) : null;
-            fastify.log.info(`Order ${orderNum} CREATE - Raw CustNum: ${order.OrderHed_CustNum}, Padded: ${custNum}`);
-            if (custNum) {
-              const companySearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchCompaniesByProperty('customer_custnum', [custNum])
-              );
-              fastify.log.info(`Order ${orderNum} CREATE - Company search results: ${companySearch.results?.length || 0}`);
-              if (companySearch.results?.[0]?.id) {
-                fastify.log.info(`Order ${orderNum} CREATE - Attempting to associate deal ${dealId} with company ${companySearch.results[0].id} using type 5`);
-                const assocResult = await ensureDealCompanyAssociation(dealId, companySearch.results[0].id);
-                fastify.log.info(`Order ${orderNum} CREATE - Deal/company association ${assocResult?.skipped ? 'skipped' : 'created'}`);
-              } else {
-                fastify.log.warn(`Order ${orderNum} CREATE - No company found with customer_custnum=${custNum}`);
-              }
-            } else {
-              fastify.log.warn(`Order ${orderNum} CREATE - No custNum (OrderHed_CustNum was empty)`);
-            }
-          } catch (associationError) {
-            fastify.log.error(`Order ${orderNum} CREATE - Failed to associate: ${associationError.message} [${associationError.response?.status || 'no-status'}]`);
-          }
-          // Check if this order has a matching quote and update it to Closed Won
-          if (quoteNum && !usedQuoteDeal) {
-            const quoteSearchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
-            );
-            if (quoteSearchData.results?.[0]?.id) {
-              await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
-            }
-          }
+          await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
+          await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
           results.created++;
         }

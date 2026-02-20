@@ -213,7 +213,7 @@ class HubspotAdapter {
 
   async batchUpsertCompanies(batchData, idProperty = 'customer_custid_') {
     if (!Array.isArray(batchData)) {
-      throw new Error('batchUpsertCompanies requires an array of records');
+      throw new TypeError('batchUpsertCompanies requires an array of records');
     }
     if (!isNonEmptyString(idProperty)) {
       throw new Error('batchUpsertCompanies requires a valid idProperty');
@@ -261,7 +261,7 @@ class HubspotAdapter {
 
   async batchUpsertContacts(batchData, idProperty = 'email') {
     if (!Array.isArray(batchData)) {
-      throw new Error('batchUpsertContacts requires an array of records');
+      throw new TypeError('batchUpsertContacts requires an array of records');
     }
     if (!isNonEmptyString(idProperty)) {
       throw new Error('batchUpsertContacts requires a valid idProperty');
@@ -309,7 +309,7 @@ class HubspotAdapter {
 
   async batchUpsertDeals(batchData, idProperty = 'orderhed_ordernum') {
     if (!Array.isArray(batchData)) {
-      throw new Error('batchUpsertDeals requires an array of records');
+      throw new TypeError('batchUpsertDeals requires an array of records');
     }
     if (!isNonEmptyString(idProperty)) {
       throw new Error('batchUpsertDeals requires a valid idProperty');
@@ -357,7 +357,7 @@ class HubspotAdapter {
 
   async batchUpsertLineItems(batchData, idProperty = 'rowident_') {
     if (!Array.isArray(batchData)) {
-      throw new Error('batchUpsertLineItems requires an array of records');
+      throw new TypeError('batchUpsertLineItems requires an array of records');
     }
     if (!isNonEmptyString(idProperty)) {
       throw new Error('batchUpsertLineItems requires a valid idProperty');

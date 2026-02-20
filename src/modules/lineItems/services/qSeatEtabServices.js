@@ -44,30 +44,6 @@ function findMatchingLineItem(existingLineItems, candidateProps) {
   }) || null;
 }
 
-function extractHubspotErrorContext(error) {
-  const chain = [];
-  let current = error;
-  while (current && chain.length < 5) {
-    chain.push(current);
-    current = current.cause;
-  }
-
-  let status;
-  let message;
-  for (const err of chain) {
-    if (status == null && err?.response?.status != null) status = err.response.status;
-    if (!message) {
-      message = err?.response?.data?.message
-        || err?.response?.data?.error
-        || err?.message
-        || message;
-    }
-  }
-
-  const combinedMessage = chain.map((err) => err?.message).filter(Boolean).join(' | ');
-  return { status, message, combinedMessage };
-}
-
 function isEntitySetDescriptor(records) {
   return records.length === 1
     && records[0]?.url === 'Data'
@@ -120,7 +96,7 @@ async function qSeatEtabService(fastify, _) {
   }
 
   /**
-   * Fetches existing HubSpot line items for a deal so we can compare properties
+   * Fetches existing HubSpot line items for a deal to compare properties
    * for dedup instead of relying on RowIdent (which changes each Epicor pull).
    */
   async function fetchExistingLineItems(dealId) {
@@ -165,7 +141,7 @@ async function qSeatEtabService(fastify, _) {
           if (value != null) cleanProps[key] = value;
         }
 
-        // Property-based dedup: skip if all properties match an existing line item
+        // Check for matching existing line item by properties
         const match = findMatchingLineItem(existingLineItems, cleanProps);
         if (match) {
           const lineItemId = match.id;
@@ -198,60 +174,6 @@ async function qSeatEtabService(fastify, _) {
           fastify.log.info(`QSeatEtab line item for quote ${quoteNum} updated on existing HubSpot line item ${lineItemId}`);
           results.updated++;
           continue;
-        }
-
-        const existingRecord = null;
-
-        if (existingRecord?.hubspotId) {
-          const lineItemId = existingRecord.hubspotId;
-          let needsCreate = false;
-
-          try {
-            await fastify.backoff(() =>
-              fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
-            );
-          } catch (error) {
-            const { status, message, combinedMessage } = extractHubspotErrorContext(error);
-            const combined = String(combinedMessage || '');
-            const notFound = status === 404
-              || String(message || '').toLowerCase().includes('resource not found')
-              || combined.toLowerCase().includes('resource not found')
-              || /\b404\b/.test(combined);
-
-            if (notFound) {
-              await fastify.lineItemRepository.deleteDatabase({ epicorId: String(epicorId) });
-              fastify.log.warn(`QSeatEtab line item ${lineItemId} not found; recreating for quote ${quoteNum}`);
-              needsCreate = true;
-            } else {
-              throw error;
-            }
-          }
-
-          if (!needsCreate) {
-            if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
-              await fastify.hubspotAdapter.ensureAssociation(
-                'line_items',
-                lineItemId,
-                'deals',
-                dealId,
-                HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
-              );
-            }
-
-            await fastify.lineItemRepository.updateDatabase(
-              { epicorId: String(epicorId) },
-              {
-                hubspotId: lineItemId,
-                source: 'EpicorQSeatEtab',
-                quoteNum,
-                action: 'update',
-              }
-            );
-
-            existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
-            results.updated++;
-            continue;
-          }
         }
 
         // No match found — create new line item

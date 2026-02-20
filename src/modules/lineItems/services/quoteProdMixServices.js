@@ -19,6 +19,16 @@ const FIELD_MAPPINGS = [
  */
 const DEDUP_PROPERTIES = ['name', 'price'];
 
+function normalizeLineItemAmount(properties) {
+  const raw = properties?.price ?? properties?.amount;
+  if (raw == null || raw === '') return '';
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return numeric.toFixed(4);
+
+  return String(raw).trim();
+}
+
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
   for (const { epicor, hubspot, transform } of FIELD_MAPPINGS) {
@@ -36,38 +46,24 @@ function transformEpicorToHubSpot(epicorRecord) {
  * Returns the matching HubSpot line item or null.
  */
 function findMatchingLineItem(existingLineItems, candidateProps) {
+  const candidateName = String(candidateProps?.name ?? '').trim();
+  const candidateAmount = normalizeLineItemAmount(candidateProps);
+  if (!candidateName || !candidateAmount) return null;
+
   return existingLineItems.find((existing) => {
     const hsProps = existing.properties || {};
-    return DEDUP_PROPERTIES.every((key) => {
-      const candidateVal = String(candidateProps[key] ?? '').trim();
-      const existingVal = String(hsProps[key] ?? '').trim();
-      return candidateVal === existingVal;
-    });
+    const existingName = String(hsProps?.name ?? '').trim();
+    const existingAmount = normalizeLineItemAmount(hsProps);
+
+    return existingName === candidateName && existingAmount === candidateAmount;
   }) || null;
 }
 
-function extractHubspotErrorContext(error) {
-  const chain = [];
-  let current = error;
-  while (current && chain.length < 5) {
-    chain.push(current);
-    current = current.cause;
-  }
-
-  let status;
-  let message;
-  for (const err of chain) {
-    if (status == null && err?.response?.status != null) status = err.response.status;
-    if (!message) {
-      message = err?.response?.data?.message
-        || err?.response?.data?.error
-        || err?.message
-        || message;
-    }
-  }
-
-  const combinedMessage = chain.map((err) => err?.message).filter(Boolean).join(' | ');
-  return { status, message, combinedMessage };
+function getEpicorId(lineItem, quoteNum, fallbackId) {
+  return lineItem.SysRowID
+    || lineItem.QuoteDtl_SysRowID
+    || `${quoteNum}|${lineItem.ProdGrup_Character01 || ''}|${lineItem.Calculated_Total || ''}`
+    || fallbackId;
 }
 
 async function quoteProdMixService(fastify, _) {
@@ -84,19 +80,8 @@ async function quoteProdMixService(fastify, _) {
     return { created: true };
   }
 
-  function getEpicorId(lineItem, quoteNum, fallbackId) {
-    return lineItem.SysRowID
-      || lineItem.QuoteDtl_SysRowID
-      || `${quoteNum}|${lineItem.ProdGrup_Character01 || ''}|${lineItem.Calculated_Total || ''}`
-      || fallbackId;
-  }
-
-  async function appendDealProdGrupValue(dealId, prodGrupValue) {
-    return;
-  }
-
   /**
-   * Fetches existing HubSpot line items for a deal so we can compare properties
+   * Fetches existing HubSpot line items for a deal to compare properties
    * for dedup instead of relying on RowIdent (which changes each Epicor pull).
    */
   async function fetchExistingLineItems(dealId) {
@@ -130,9 +115,8 @@ async function quoteProdMixService(fastify, _) {
         }
 
         const epicorId = getEpicorId(lineItem, quoteNum);
-        const existingRecord = null;
 
-        // Property-based dedup: skip if all properties match an existing line item
+        // Check for matching existing line item by properties
         const match = findMatchingLineItem(existingLineItems, cleanProps);
         if (match) {
           const lineItemId = match.id;
@@ -163,62 +147,6 @@ async function quoteProdMixService(fastify, _) {
           fastify.log.info(`QuoteProdMix line item for quote ${quoteNum} updated on existing HubSpot line item ${lineItemId}`);
           results.updated++;
           continue;
-        }
-
-        if (existingRecord?.hubspotId) {
-          const lineItemId = existingRecord.hubspotId;
-          let needsCreate = false;
-
-          try {
-            await fastify.backoff(() =>
-              fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
-            );
-          } catch (error) {
-            const { status, message, combinedMessage } = extractHubspotErrorContext(error);
-            const combined = String(combinedMessage || '');
-            const notFound = status === 404
-              || String(message || '').toLowerCase().includes('resource not found')
-              || combined.toLowerCase().includes('resource not found')
-              || /\b404\b/.test(combined);
-
-            if (notFound) {
-              await fastify.lineItemRepository.deleteDatabase({ epicorId: String(epicorId) });
-              fastify.log.warn(`QuoteProdMix line item ${lineItemId} not found; recreating for quote ${quoteNum}`);
-              needsCreate = true;
-            } else {
-              throw error;
-            }
-          }
-
-          if (!needsCreate) {
-            if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
-              await fastify.hubspotAdapter.ensureAssociation(
-                'line_items',
-                lineItemId,
-                'deals',
-                dealId,
-                HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
-              );
-            }
-
-            await fastify.lineItemRepository.updateDatabase(
-              { epicorId: String(epicorId) },
-              {
-                hubspotId: lineItemId,
-                source: 'EpicorQuoteProdMix',
-                quoteNum,
-                action: 'update',
-              }
-            );
-
-            existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
-            results.updated++;
-
-            if (dealId) {
-              await appendDealProdGrupValue(dealId, props.prodgrup_character01);
-            }
-            continue;
-          }
         }
 
         // No match found — create new line item
@@ -260,10 +188,6 @@ async function quoteProdMixService(fastify, _) {
         existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
 
         results.created++;
-
-        if (dealId) {
-          await appendDealProdGrupValue(dealId, props.prodgrup_character01);
-        }
 
       } catch (error) {
         fastify.log.error(`QuoteProdMix line item for quote ${quoteNum} failed: ${error.message}`);

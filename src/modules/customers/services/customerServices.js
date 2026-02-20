@@ -3,7 +3,7 @@ import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
 
 const FIELD_MAPPINGS = [
   { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
-  { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: padCustNum }, //customer_custid in prod - customer_custid_ in dev
+  { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: padCustNum },
   { epicor: 'Customer_Name', hubspot: 'name', transform: (v) => v ? String(v).trim().substring(0, 200) : null },
   { epicor: 'Customer_Address1', hubspot: 'address', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
   { epicor: 'Customer_Address2', hubspot: 'address2', transform: (v) => v ? String(v).trim().substring(0, 255) : null },
@@ -11,8 +11,8 @@ const FIELD_MAPPINGS = [
   { epicor: 'Customer_City', hubspot: 'city', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
   { epicor: 'Customer_State', hubspot: 'hs_state_code', transform: (v) => v ? String(v).trim().substring(0, 50) : null },
   { epicor: 'Customer_Zip', hubspot: 'zip', transform: (v) => v ? String(v).trim().substring(0, 20) : null },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep', transform: (v) => v ? String(v).trim() : null }, //salesrep_name in production - salesrep in dev
-  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: (v) => v ? String(v).trim() : null }, //salresrep in production - salesrepa_name in dev
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep', transform: (v) => v ? String(v).trim() : null },
+  { epicor: 'SalesRep1_Name', hubspot: 'salesrepa_name', transform: (v) => v ? String(v).trim() : null },
   { epicor: 'CustGrup_GroupDesc', hubspot: 'custgrup_groupdesc', transform: (v) => v ? String(v).trim().substring(0, 100) : null },
   { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
 ];

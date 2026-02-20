@@ -9,6 +9,7 @@ const HARDCODED_QSEAT_ETAB_QUOTE_NUM = 161247;
 
 async function epicorExportService(fastify, _) {
   const { ENDPOINTS } = fastify.constants;
+  const BAQ_ID = '68138';
 
   const exportDir = fastify.config?.EXPORT_DIR
     ? path.resolve(fastify.config.EXPORT_DIR)
@@ -34,6 +35,141 @@ async function epicorExportService(fastify, _) {
     return filePath;
   };
 
+  const buildBaqDataUrl = (endpoint, queryParams = {}) => {
+    const baseUrl = String(fastify.config?.BASE_URL || '').replace(/\/+$/, '');
+    if (!baseUrl) {
+      throw new Error('Missing BASE_URL configuration for Epicor API');
+    }
+
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(queryParams || {})) {
+      if (value == null || value === '') continue;
+      params.set(key, String(value));
+    }
+
+    const queryString = params.toString();
+    const suffix = queryString ? `?${queryString}` : '';
+    return `${baseUrl}/${endpoint}(${BAQ_ID})/Data${suffix}`;
+  };
+
+  const fetchAllBaqDataRecords = async (endpoint, extraParams = {}) => {
+    const top = fastify.constants?.PAGINATION?.TOP || 50000;
+    let skip = 0;
+    const allRecords = [];
+    let pagesFetched = 0;
+    const startTime = Date.now();
+    let lastUrl = null;
+
+    while (true) {
+      const requestUrl = buildBaqDataUrl(endpoint, {
+        $top: top,
+        $skip: skip,
+        ...extraParams,
+      });
+      lastUrl = requestUrl;
+
+      const response = await fastify.epicorAdapter._makeRequest(requestUrl);
+      const records = response?.data?.value || [];
+      pagesFetched++;
+
+      if (!records.length) break;
+      allRecords.push(...records);
+
+      if (records.length < top) break;
+      skip += top;
+    }
+
+    return {
+      requestUrl: lastUrl,
+      records: allRecords,
+      metadata: {
+        totalRecords: allRecords.length,
+        pagesFetched,
+        elapsedTimeMs: Date.now() - startTime,
+      },
+    };
+  };
+
+  const fetchRecordsForTable = async (tableKey, endpoint) => {
+    try {
+      return await fastify.epicorAdapter.fetchAllRecords(endpoint);
+    } catch (error) {
+      const status = error?.response?.status;
+      const isBadRequest = status === 400 || String(error?.message || '').includes('400 Bad Request');
+      const shouldUseBaqFallback = isBadRequest && ['QUOTES', 'QUOTE_PROD_MIX'].includes(tableKey);
+
+      if (!shouldUseBaqFallback) {
+        throw error;
+      }
+
+      fastify.log.warn(`Falling back to BAQ Data endpoint for ${tableKey} due to ${error.message}`);
+      return await fetchAllBaqDataRecords(endpoint);
+    }
+  };
+
+  const exportQSeatEtabByQuoteNumbers = async () => {
+    const quoteEndpoint = ENDPOINTS.QUOTES;
+    const qseatEndpoint = ENDPOINTS.QSEAT_ETAB;
+
+    if (!quoteEndpoint || !qseatEndpoint) {
+      throw new Error('Missing QUOTES or QSEAT_ETAB endpoint configuration');
+    }
+
+    const quoteData = await fetchRecordsForTable('QUOTES', quoteEndpoint);
+    const quoteNumbers = [...new Set(
+      (quoteData.records || [])
+        .map((quote) => extractQuoteNum(quote))
+        .filter(Boolean)
+    )];
+
+    const records = [];
+    const perQuote = [];
+    const startTime = Date.now();
+
+    for (const quoteNum of quoteNumbers) {
+      try {
+        const qseatData = await fetchAllBaqDataRecords(qseatEndpoint, { QuoteNum: quoteNum });
+        const count = qseatData.metadata.totalRecords;
+        if (count > 0) {
+          records.push(...qseatData.records);
+        }
+
+        perQuote.push({ quoteNum, totalRecords: count });
+      } catch (error) {
+        perQuote.push({ quoteNum, error: error.message });
+      }
+    }
+
+    const payload = {
+      table: 'QSEAT_ETAB',
+      endpoint: qseatEndpoint,
+      exportedAt: new Date().toISOString(),
+      source: 'quote-driven',
+      quoteNumbersProcessed: quoteNumbers.length,
+      metadata: {
+        totalRecords: records.length,
+        pagesFetched: 0,
+        elapsedTimeMs: Date.now() - startTime,
+      },
+      perQuote,
+      records,
+    };
+
+    const filePath = await writeJsonFile('QSEAT_ETAB', payload);
+
+    return {
+      success: true,
+      table: 'QSEAT_ETAB',
+      endpoint: qseatEndpoint,
+      exportDir,
+      filePath,
+      totalRecords: payload.metadata.totalRecords,
+      pagesFetched: payload.metadata.pagesFetched,
+      elapsedTimeMs: payload.metadata.elapsedTimeMs,
+      quoteNumbersProcessed: quoteNumbers.length,
+    };
+  };
+
   const exportTable = async (table) => {
     const { key, endpoint } = getEndpointForTable(table);
     if (!endpoint) {
@@ -44,7 +180,11 @@ async function epicorExportService(fastify, _) {
       };
     }
 
-    const { records, metadata } = await fastify.epicorAdapter.fetchAllRecords(endpoint);
+    if (key === 'QSEAT_ETAB') {
+      return await exportQSeatEtabByQuoteNumbers();
+    }
+
+    const { records, metadata } = await fetchRecordsForTable(key, endpoint);
     const payload = {
       table: key,
       endpoint,
@@ -71,8 +211,17 @@ async function epicorExportService(fastify, _) {
     const results = [];
 
     for (const tableKey of Object.keys(ENDPOINTS)) {
-      const result = await exportTable(tableKey);
-      results.push(result);
+      try {
+        const result = await exportTable(tableKey);
+        results.push(result);
+      } catch (error) {
+        fastify.log.error(`Export failed for ${tableKey}: ${error.message}`);
+        results.push({
+          success: false,
+          table: tableKey,
+          error: error.message,
+        });
+      }
     }
 
     const successes = results.filter((r) => r.success).length;
@@ -120,12 +269,12 @@ async function epicorExportService(fastify, _) {
       throw new Error('Missing QUOTES or QSEAT_ETAB endpoint configuration');
     }
 
-    const quotesResponse = await fastify.epicorAdapter.fetchLimitedRecords(quoteEndpoint, quoteLimit);
+    const quotesResponse = await fetchRecordsForTable('QUOTES', quoteEndpoint);
     const quoteNumbers = [...new Set(
       (quotesResponse.records || [])
         .map((quote) => extractQuoteNum(quote))
         .filter(Boolean)
-    )];
+    )].slice(0, quoteLimit);
 
     const perQuoteResults = [];
     let totalQseatRecords = 0;
@@ -160,7 +309,7 @@ async function epicorExportService(fastify, _) {
       endpoint: qseatEndpoint,
       exportedAt: new Date().toISOString(),
       quoteSampleSizeRequested: quoteLimit,
-      quotesFetched: quotesResponse.metadata.totalRecords,
+      quotesFetched: quotesResponse.metadata?.totalRecords || quoteNumbers.length,
       quoteNumbersUsed: quoteNumbers.length,
       totalQseatRecords,
       successfulQueries: perQuoteResults.filter((item) => !item.error).length,

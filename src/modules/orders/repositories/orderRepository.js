@@ -38,7 +38,7 @@ async function orderRepository(fastify) {
       deleteDatabase: (filter) => deleteDatabase(collection, filter),
     });
   }
-  }
+}
 
 export default fp(orderRepository, {
   name: 'orderRepository',
