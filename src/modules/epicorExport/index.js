@@ -33,6 +33,45 @@ export default fp(
       }
     });
 
+    fastify.get('/epicor/export/quotes', async (request, reply) => {
+      try {
+        const result = await fastify.epicorExportService.exportQuotesOnly();
+        return reply.send(result);
+      } catch (error) {
+        fastify.log.error(`Epicor quotes export failed: ${error.message}`);
+        return reply.status(500).send({
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    fastify.get('/epicor/export/quoteprodmix', async (request, reply) => {
+      try {
+        const result = await fastify.epicorExportService.exportQuoteProdMixByQuotes();
+        return reply.send(result);
+      } catch (error) {
+        fastify.log.error(`Epicor QuoteProdMix export failed: ${error.message}`);
+        return reply.status(500).send({
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    fastify.get('/epicor/export/qseatetab', async (request, reply) => {
+      try {
+        const result = await fastify.epicorExportService.exportQSeatEtabByQuoteNumbers();
+        return reply.send(result);
+      } catch (error) {
+        fastify.log.error(`Epicor QSeatEtab export failed: ${error.message}`);
+        return reply.status(500).send({
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
     fastify.get('/epicor/export/:table', async (request, reply) => {
       try {
         const { table } = request.params;

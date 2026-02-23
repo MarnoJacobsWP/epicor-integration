@@ -107,6 +107,50 @@ async function epicorExportService(fastify, _) {
     }
   };
 
+  const isEntitySetDescriptor = (records) => {
+    return records.length === 1
+      && records[0]?.url === 'Data'
+      && records[0]?.kind === 'EntitySet';
+  };
+
+  const fetchQSeatEtabForQuote = async (quoteNum) => {
+    const qseatEndpoint = ENDPOINTS.QSEAT_ETAB;
+    const baseUrl = String(fastify.config?.BASE_URL || '').replace(/\/+$/, '');
+    const normalizedQuoteNum = String(quoteNum ?? '').trim();
+
+    if (!qseatEndpoint || !baseUrl || !normalizedQuoteNum) {
+      throw new Error('Missing endpoint, base URL, or quote number for QSeatEtab fetch');
+    }
+
+    const encodedQuoteNum = encodeURIComponent(normalizedQuoteNum);
+    const candidateUrls = [
+      `${baseUrl}/${qseatEndpoint}(${BAQ_ID})/Data?QuoteNum=${encodedQuoteNum}`,
+      `${baseUrl}/${qseatEndpoint}(${BAQ_ID})/Data/?QuoteNum=${encodedQuoteNum}`,
+      `${baseUrl}/${qseatEndpoint}(${BAQ_ID})/?QuoteNum=${encodedQuoteNum}`,
+    ];
+
+    let lastError = null;
+
+    for (const url of candidateUrls) {
+      try {
+        const response = await fastify.epicorAdapter._makeRequest(url);
+        const records = response?.data?.value || [];
+
+        if (isEntitySetDescriptor(records)) {
+          continue;
+        }
+
+        fastify.log.info(`Fetched ${records.length} QSeatEtab records for quote ${normalizedQuoteNum}`);
+        return records;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError) throw lastError;
+    return [];
+  };
+
   const exportQSeatEtabByQuoteNumbers = async () => {
     const quoteEndpoint = ENDPOINTS.QUOTES;
     const qseatEndpoint = ENDPOINTS.QSEAT_ETAB;
@@ -128,10 +172,10 @@ async function epicorExportService(fastify, _) {
 
     for (const quoteNum of quoteNumbers) {
       try {
-        const qseatData = await fetchAllBaqDataRecords(qseatEndpoint, { QuoteNum: quoteNum });
-        const count = qseatData.metadata.totalRecords;
+        const qseatRecords = await fetchQSeatEtabForQuote(quoteNum);
+        const count = qseatRecords.length;
         if (count > 0) {
-          records.push(...qseatData.records);
+          records.push(...qseatRecords);
         }
 
         perQuote.push({ quoteNum, totalRecords: count });
@@ -414,9 +458,109 @@ async function epicorExportService(fastify, _) {
     };
   };
 
+  const exportQuotesOnly = async () => {
+    const endpoint = ENDPOINTS.QUOTES;
+    if (!endpoint) {
+      throw new Error('Missing QUOTES endpoint configuration');
+    }
+
+    const { records, metadata } = await fetchRecordsForTable('QUOTES', endpoint);
+    const payload = {
+      table: 'QUOTES',
+      endpoint,
+      exportedAt: new Date().toISOString(),
+      metadata,
+      records,
+    };
+
+    const filePath = await writeJsonFile('QUOTES', payload);
+
+    return {
+      success: true,
+      table: 'QUOTES',
+      endpoint,
+      exportDir,
+      filePath,
+      totalRecords: metadata.totalRecords,
+      pagesFetched: metadata.pagesFetched,
+      elapsedTimeMs: metadata.elapsedTimeMs,
+    };
+  };
+
+  const exportQuoteProdMixByQuotes = async () => {
+    const quoteEndpoint = ENDPOINTS.QUOTES;
+    const quoteProdMixEndpoint = ENDPOINTS.QUOTE_PROD_MIX;
+
+    if (!quoteEndpoint || !quoteProdMixEndpoint) {
+      throw new Error('Missing QUOTES or QUOTE_PROD_MIX endpoint configuration');
+    }
+
+    fastify.log.info('Fetching all quotes to drive QuoteProdMix export...');
+    const quoteData = await fetchRecordsForTable('QUOTES', quoteEndpoint);
+    const quoteNumbers = [...new Set(
+      (quoteData.records || [])
+        .map((quote) => extractQuoteNum(quote))
+        .filter(Boolean)
+    )];
+
+    fastify.log.info(`Found ${quoteNumbers.length} unique quote numbers, fetching QuoteProdMix for each...`);
+
+    const records = [];
+    const perQuote = [];
+    const startTime = Date.now();
+
+    for (const quoteNum of quoteNumbers) {
+      try {
+        const result = await fastify.epicorAdapter.fetchRelatedRecords(
+          quoteProdMixEndpoint,
+          'QuoteDtl_QuoteNum',
+          quoteNum
+        );
+        const count = result.metadata.totalRecords;
+        if (count > 0) {
+          records.push(...result.records);
+        }
+        perQuote.push({ quoteNum, totalRecords: count });
+      } catch (error) {
+        perQuote.push({ quoteNum, error: error.message });
+      }
+    }
+
+    const payload = {
+      table: 'QUOTE_PROD_MIX',
+      endpoint: quoteProdMixEndpoint,
+      exportedAt: new Date().toISOString(),
+      source: 'quote-driven',
+      quoteNumbersProcessed: quoteNumbers.length,
+      metadata: {
+        totalRecords: records.length,
+        pagesFetched: 0,
+        elapsedTimeMs: Date.now() - startTime,
+      },
+      perQuote,
+      records,
+    };
+
+    const filePath = await writeJsonFile('QUOTE_PROD_MIX', payload);
+
+    return {
+      success: true,
+      table: 'QUOTE_PROD_MIX',
+      endpoint: quoteProdMixEndpoint,
+      exportDir,
+      filePath,
+      totalRecords: payload.metadata.totalRecords,
+      quoteNumbersProcessed: quoteNumbers.length,
+      elapsedTimeMs: payload.metadata.elapsedTimeMs,
+    };
+  };
+
   fastify.decorate('epicorExportService', {
     exportAllTables,
     exportTable,
+    exportQuotesOnly,
+    exportQuoteProdMixByQuotes,
+    exportQSeatEtabByQuoteNumbers,
     testQSeatEtabByQuotes,
     exportQSeatEtabForHardcodedQuote,
   });
