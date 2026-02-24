@@ -8,7 +8,7 @@ const toMidnightUTC = (v) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'QuoteHed_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },
+  { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum_', transform: String },
   { epicor: 'QuoteHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
   { epicor: 'Customer_Name', hubspot: 'customer_name' },
   { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },
