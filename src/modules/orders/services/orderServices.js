@@ -144,8 +144,11 @@ async function orderService(fastify, _) {
       }
       
       try {
-        await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId);
-        fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data`);
+        // Quote deal has both quote and order — order takes precedence.
+        // clearAll removes all existing line items (QuoteProdMix, QSeatEtab, etc.)
+        // before recreating from OrderProdMix only.
+        await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId, { clearAll: true });
+        fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data (cleared all previous)`);
       } catch (quoteLineItemError) {
         fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
       }
@@ -309,7 +312,8 @@ async function orderService(fastify, _) {
             });
 
             try {
-              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, newDealId);
+              // clearAll when deal has both quote and order — order takes precedence
+              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, newDealId, quoteNum ? { clearAll: true } : {});
             } catch (lineItemError) {
               fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
             }
@@ -338,7 +342,8 @@ async function orderService(fastify, _) {
           }
 
           try {
-            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
+            // clearAll when deal has both quote and order — order takes precedence
+            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId, quoteNum ? { clearAll: true } : {});
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
@@ -365,7 +370,8 @@ async function orderService(fastify, _) {
           });
 
           try {
-            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
+            // clearAll when deal has both quote and order — order takes precedence
+            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId, quoteNum ? { clearAll: true } : {});
           } catch (lineItemError) {
             fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }

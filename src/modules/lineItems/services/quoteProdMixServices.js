@@ -70,7 +70,7 @@ function filterQuoteProdMixItems(lineItems) {
 }
 
 async function quoteProdMixService(fastify, _) {
-  const { HUBSPOT_ASSOCIATIONS } = fastify.constants;
+  const { ENDPOINTS, HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
   async function fetchExistingLineItems(dealId) {
     try {
@@ -191,10 +191,72 @@ async function quoteProdMixService(fastify, _) {
 
   async function task(dateString) {
     try {
-      fastify.log.info('Processing Tasks for Quote Line Items');
-      return { success: true, message: 'Quote line items processed by quote service' };
+      fastify.log.info('Processing independent QuoteProdMix Calculated_Time trigger...');
+
+      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(
+        ENDPOINTS.QUOTE_PROD_MIX
+      );
+
+      if (!records?.length) {
+        fastify.log.info('No recently changed QuoteProdMix records found');
+        return { success: true, message: 'No QuoteProdMix changes detected', metadata };
+      }
+
+      // Group records by quote number
+      const byQuote = new Map();
+      for (const record of records) {
+        const quoteNum = record.QuoteDtl_QuoteNum;
+        if (!quoteNum) continue;
+        if (!byQuote.has(quoteNum)) byQuote.set(quoteNum, []);
+        byQuote.get(quoteNum).push(record);
+      }
+
+      fastify.log.info(`QuoteProdMix trigger: ${records.length} records across ${byQuote.size} quotes`);
+
+      const results = { synced: 0, skipped: 0, errors: 0 };
+
+      for (const [quoteNum, quoteRecords] of byQuote) {
+        try {
+          // Find the HubSpot deal for this quote
+          const searchData = await fastify.backoff(() =>
+            fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+          );
+          const deal = searchData.results?.[0];
+
+          if (!deal?.id) {
+            fastify.log.debug(`QuoteProdMix trigger: No deal found for quote ${quoteNum}, skipping`);
+            results.skipped++;
+            continue;
+          }
+
+          // Deal source check: if deal has an order number, order takes precedence — skip
+          const dealProps = deal.properties || {};
+          const hasOrder = dealProps.orderhed_ordernum
+            && String(dealProps.orderhed_ordernum).trim() !== '';
+          if (hasOrder) {
+            fastify.log.info(
+              `QuoteProdMix trigger: Deal ${deal.id} for quote ${quoteNum} has order ${dealProps.orderhed_ordernum} — order takes precedence, skipping`
+            );
+            results.skipped++;
+            continue;
+          }
+
+          const dealId = deal.id;
+          const uniqueRecords = deduplicateEpicorRecords(quoteRecords);
+
+          await reconcileAndSync(uniqueRecords, dealId);
+          fastify.log.info(`QuoteProdMix trigger: Reconciled ${uniqueRecords.length} items for quote ${quoteNum} (deal ${dealId})`);
+          results.synced++;
+        } catch (error) {
+          fastify.log.error(`QuoteProdMix trigger failed for quote ${quoteNum}: ${error.message}`);
+          results.errors++;
+        }
+      }
+
+      fastify.log.info(`QuoteProdMix trigger complete: ${results.synced} synced, ${results.skipped} skipped, ${results.errors} errors`);
+      return { success: true, ...results, metadata };
     } catch (error) {
-      fastify.log.error(`Error processing Tasks for Quote Line Items: ${error.message}`);
+      fastify.log.error(`Error processing QuoteProdMix trigger: ${error.message}`);
       throw error;
     }
   }

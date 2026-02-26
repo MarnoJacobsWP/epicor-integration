@@ -112,11 +112,56 @@ async function orderProdMixService(fastify, _) {
     return created;
   }
 
-  async function reconcileAndSync(epicorRecords, dealId) {
+  /**
+   * Reconciles Epicor OrderProdMix records against HubSpot line items.
+   * @param {Array} epicorRecords - Desired Epicor records
+   * @param {string} dealId - HubSpot deal ID
+   * @param {{ clearAll?: boolean }} options
+   *   When clearAll is true, ALL existing line items on the deal are deleted
+   *   (regardless of source) before creating OrderProdMix items. Used when
+   *   a deal has both a quote and an order — order takes precedence.
+   */
+  async function reconcileAndSync(epicorRecords, dealId, { clearAll = false } = {}) {
     const results = { created: 0, deleted: 0, unchanged: 0, errors: 0 };
 
     const desiredItems = epicorRecords.map(buildCleanProperties);
     const allExisting = dealId ? await fetchExistingLineItems(dealId) : [];
+
+    if (clearAll) {
+      // Order takes precedence: nuke every line item on the deal, then recreate.
+      fastify.log.info(
+        `Deal ${dealId}: clearAll mode — removing all ${allExisting.length} existing line items before OrderProdMix sync`
+      );
+
+      for (const item of allExisting) {
+        try {
+          await deleteHubSpotLineItem(item.id);
+          results.deleted++;
+        } catch (error) {
+          fastify.log.error(`Failed to delete line item ${item.id} during clearAll: ${error.message}`);
+          results.errors++;
+        }
+      }
+
+      // After clearing, create every desired item (no reconciliation needed).
+      for (const properties of desiredItems) {
+        try {
+          const created = await createHubSpotLineItem(properties, dealId);
+          fastify.log.info(`Created OrderProdMix line item ${created.id} on deal ${dealId}`);
+          results.created++;
+        } catch (error) {
+          fastify.log.error(`Failed to create OrderProdMix line item on deal ${dealId}: ${error.message}`);
+          results.errors++;
+        }
+      }
+
+      fastify.log.info(
+        `OrderProdMix clearAll for deal ${dealId}: ${results.created} created, ${results.deleted} deleted, ${results.errors} errors`
+      );
+      return results;
+    }
+
+    // Normal reconciliation: only touch OrderProdMix-sourced items.
     const sourceItems = filterOrderProdMixItems(allExisting);
 
     fastify.log.info(
@@ -154,7 +199,14 @@ async function orderProdMixService(fastify, _) {
     return results;
   }
 
-  async function syncLineItemsForOrder(orderNum, dealId) {
+  /**
+   * Sync OrderProdMix line items for a single order to a HubSpot deal.
+   * @param {number|string} orderNum
+   * @param {string} dealId
+   * @param {{ clearAll?: boolean }} options - Pass clearAll:true when the deal
+   *   has both a quote and an order so order takes precedence.
+   */
+  async function syncLineItemsForOrder(orderNum, dealId, options = {}) {
     fastify.log.info(`Fetching OrderProdMix line items for order ${orderNum}`);
     const { records, metadata } = await fastify.epicorAdapter.fetchRelatedRecords(
       ENDPOINTS.ORDER_PROD_MIX,
@@ -170,7 +222,7 @@ async function orderProdMixService(fastify, _) {
 
     fastify.log.info(`Found ${records?.length || 0} OrderProdMix records, deduplicated to ${uniqueRecords.length} for order ${orderNum}`);
 
-    const results = await reconcileAndSync(uniqueRecords, dealId);
+    const results = await reconcileAndSync(uniqueRecords, dealId, options);
 
     return {
       success: true,
@@ -183,12 +235,73 @@ async function orderProdMixService(fastify, _) {
     };
   }
 
+  /**
+   * Independent Calculated_Time trigger for OrderProdMix.
+   * Fetches OrderProdMix records that changed recently, groups by order number,
+   * finds the corresponding HubSpot deals, and runs reconciliation.
+   */
   async function task(dateString) {
     try {
-      fastify.log.info('Processing Tasks for Order Line Items');
-      return { success: true, message: 'Order line items processed by order service' };
+      fastify.log.info('Processing independent OrderProdMix Calculated_Time trigger...');
+
+      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(
+        ENDPOINTS.ORDER_PROD_MIX
+      );
+
+      if (!records?.length) {
+        fastify.log.info('No recently changed OrderProdMix records found');
+        return { success: true, message: 'No OrderProdMix changes detected', metadata };
+      }
+
+      // Group records by order number
+      const byOrder = new Map();
+      for (const record of records) {
+        const orderNum = record.OrderDtl_OrderNum;
+        if (!orderNum) continue;
+        if (!byOrder.has(orderNum)) byOrder.set(orderNum, []);
+        byOrder.get(orderNum).push(record);
+      }
+
+      fastify.log.info(`OrderProdMix trigger: ${records.length} records across ${byOrder.size} orders`);
+
+      const results = { synced: 0, skipped: 0, errors: 0 };
+
+      for (const [orderNum, orderRecords] of byOrder) {
+        try {
+          // Find the HubSpot deal for this order
+          const searchData = await fastify.backoff(() =>
+            fastify.hubspotAdapter.searchDealsByProperty('orderhed_ordernum', [orderNum])
+          );
+          const deal = searchData.results?.[0];
+
+          if (!deal?.id) {
+            fastify.log.debug(`OrderProdMix trigger: No deal found for order ${orderNum}, skipping`);
+            results.skipped++;
+            continue;
+          }
+
+          const dealId = deal.id;
+          const uniqueRecords = deduplicateEpicorRecords(orderRecords);
+
+          // Check if deal has both order and quote (order takes precedence → clearAll)
+          const dealProps = deal.properties || {};
+          const hasQuote = dealProps.quotehed_quotenum_
+            && String(dealProps.quotehed_quotenum_).trim() !== '';
+          const clearAll = hasQuote;
+
+          await reconcileAndSync(uniqueRecords, dealId, { clearAll });
+          fastify.log.info(`OrderProdMix trigger: Reconciled ${uniqueRecords.length} items for order ${orderNum} (deal ${dealId})`);
+          results.synced++;
+        } catch (error) {
+          fastify.log.error(`OrderProdMix trigger failed for order ${orderNum}: ${error.message}`);
+          results.errors++;
+        }
+      }
+
+      fastify.log.info(`OrderProdMix trigger complete: ${results.synced} synced, ${results.skipped} skipped, ${results.errors} errors`);
+      return { success: true, ...results, metadata };
     } catch (error) {
-      fastify.log.error(`Error processing Tasks for Order Line Items: ${error.message}`);
+      fastify.log.error(`Error processing OrderProdMix trigger: ${error.message}`);
       throw error;
     }
   }

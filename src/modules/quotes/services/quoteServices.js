@@ -171,6 +171,47 @@ async function quoteService(fastify, _) {
     }
   }
 
+  /**
+   * Checks whether a deal already has an order number set.
+   * When the deal has both a quote and an order, the order takes precedence
+   * for line items — QuoteProdMix and QSeatEtab line item sync should be skipped.
+   */
+  async function dealHasOrder(dealId) {
+    try {
+      const deal = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getDealById({ dealId, properties: ['orderhed_ordernum'] })
+      );
+      const orderNum = deal?.properties?.orderhed_ordernum;
+      return orderNum != null && String(orderNum).trim() !== '';
+    } catch (error) {
+      fastify.log.warn(`Quote: Failed to check order presence on deal ${dealId}: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Syncs QuoteProdMix and QSeatEtab line items for a quote deal, but only
+   * if the deal does not already have an order number (order takes precedence).
+   */
+  async function syncQuoteLineItems(quoteNum, dealId) {
+    if (await dealHasOrder(dealId)) {
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} has an order number — order takes precedence, skipping quote line item sync`);
+      return;
+    }
+
+    try {
+      await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
+    } catch (lineItemError) {
+      fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
+    }
+
+    try {
+      await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
+    } catch (lineItemError) {
+      fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
+    }
+  }
+
   async function processQuotesIndividually(quotes, results) {
     fastify.log.info(`Starting individual processing for ${quotes.length} quotes...`);
     const salesRepOptions = await getSalesRepOptions();
@@ -285,17 +326,7 @@ async function quoteService(fastify, _) {
               timestamp: new Date()
             });
 
-            try {
-              await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, newDealId);
-            } catch (lineItemError) {
-              fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
-            }
-
-            try {
-              await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, newDealId);
-            } catch (lineItemError) {
-              fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
-            }
+            await syncQuoteLineItems(quoteNum, newDealId);
 
             await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, newDealId);
 
@@ -324,17 +355,7 @@ async function quoteService(fastify, _) {
             });
           }
 
-          try {
-            await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
-          } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
-          }
-
-          try {
-            await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
-          } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
-          }
+          await syncQuoteLineItems(quoteNum, dealId);
 
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
 
@@ -356,17 +377,7 @@ async function quoteService(fastify, _) {
             timestamp: new Date()
           });
 
-          try {
-            await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
-          } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
-          }
-
-          try {
-            await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
-          } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum}: ${lineItemError.message}`);
-          }
+          await syncQuoteLineItems(quoteNum, dealId);
 
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
 
