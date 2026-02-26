@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin';
-import { reconcileLineItems } from '../../shared/lineItemReconciliation.js';
+import { reconcileLineItems, deduplicateDesiredItems, buildMatchKey } from '../../shared/lineItemReconciliation.js';
 
 const toSingleLineText = (value) => {
   if (value == null) return null;
@@ -120,7 +120,13 @@ async function quoteProdMixService(fastify, _) {
   async function reconcileAndSync(epicorRecords, dealId) {
     const results = { created: 0, deleted: 0, unchanged: 0, errors: 0 };
 
-    const desiredItems = epicorRecords.map(buildCleanProperties);
+    // Deduplicate desired items by Name + Amount before reconciliation
+    const rawDesired = epicorRecords.map(buildCleanProperties);
+    const desiredItems = deduplicateDesiredItems(rawDesired, (item) => buildMatchKey(item.name, item.price));
+    if (rawDesired.length !== desiredItems.length) {
+      fastify.log.info(`QuoteProdMix: Deduped desired items from ${rawDesired.length} to ${desiredItems.length} by name+amount`);
+    }
+
     const allExisting = dealId ? await fetchExistingLineItems(dealId) : [];
     const sourceItems = filterQuoteProdMixItems(allExisting);
 
@@ -188,6 +194,34 @@ async function quoteProdMixService(fastify, _) {
     };
   }
 
+  /**
+   * Purges ALL QuoteProdMix line items from a deal.
+   * Used when an Order takes over — QuoteProdMix data must never exist
+   * on a deal that has a SalesOrderNum.
+   */
+  async function purgeQuoteProdMixItems(dealId) {
+    const allExisting = await fetchExistingLineItems(dealId);
+    const quoteProdMixItems = filterQuoteProdMixItems(allExisting);
+
+    if (quoteProdMixItems.length === 0) {
+      fastify.log.debug(`Deal ${dealId}: No QuoteProdMix items to purge`);
+      return { deleted: 0 };
+    }
+
+    let deleted = 0;
+    for (const item of quoteProdMixItems) {
+      try {
+        await deleteHubSpotLineItem(item.id);
+        deleted++;
+      } catch (error) {
+        fastify.log.error(`Failed to purge QuoteProdMix item ${item.id} from deal ${dealId}: ${error.message}`);
+      }
+    }
+
+    fastify.log.info(`Purged ${deleted} QuoteProdMix items from deal ${dealId}`);
+    return { deleted };
+  }
+
   async function task(dateString) {
     try {
       fastify.log.info('Processing Tasks for Quote Line Items');
@@ -201,6 +235,7 @@ async function quoteProdMixService(fastify, _) {
   if (!fastify.hasDecorator('quoteProdMixService')) {
     fastify.decorate('quoteProdMixService', {
       syncLineItemsForQuote,
+      purgeQuoteProdMixItems,
       task,
     });
   }

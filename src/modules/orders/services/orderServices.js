@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
+import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
 
 const toMidnightUTC = (v) => {
   const d = new Date(v);
@@ -143,12 +144,8 @@ async function orderService(fastify, _) {
         fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won (deal ${quoteDealId})`);
       }
       
-      try {
-        await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId);
-        fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data`);
-      } catch (quoteLineItemError) {
-        fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
-      }
+      // Sync all order line items (purge QuoteProdMix, sync OrderProdMix + QSeatEtab)
+      await syncOrderLineItems(orderNum, quoteNum, quoteDealId);
     } catch (quoteUpdateError) {
       fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
     }
@@ -190,6 +187,78 @@ async function orderService(fastify, _) {
     } catch (error) {
       fastify.log.warn(`Order ${orderNum}: Failed to check matching quote ${quoteNum}: ${error.message}`);
     }
+  }
+
+  /** Properties needed for cross-source deduplication scanning. */
+  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'amount', 'hs_sku'];
+
+  /**
+   * Scans all line items on a deal and removes cross-source duplicates.
+   * Acts as a final safety net after per-source reconciliation.
+   */
+  async function deduplicateDealLineItems(dealId) {
+    try {
+      const allItems = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getLineItemsForDeal(dealId, DEDUP_FETCH_PROPERTIES)
+      );
+      const duplicates = findDuplicatesOnDeal(allItems);
+      if (duplicates.length === 0) return;
+
+      fastify.log.info(`Deal ${dealId}: Removing ${duplicates.length} cross-source duplicate line items`);
+      for (const dup of duplicates) {
+        try {
+          await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(dup.id));
+          await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(dup.id) }).catch(() => {});
+        } catch (error) {
+          fastify.log.error(`Failed to delete duplicate line item ${dup.id}: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      fastify.log.warn(`Deal ${dealId}: Cross-source dedup failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Syncs all line items for an Order deal.
+   *
+   * Enforces source-of-truth rules:
+   * 1. Purge any QuoteProdMix items (Order data supersedes Quote data)
+   * 2. Reconcile OrderProdMix items against Epicor
+   * 3. Reconcile QSeatEtab items using the associated QuoteNum
+   * 4. Cross-source dedup as a final safety net
+   *
+   * @param {string|number} orderNum - Epicor SalesOrderNum
+   * @param {string|number} quoteNum - Associated QuoteNum (may be falsy)
+   * @param {string} dealId - HubSpot deal ID
+   */
+  async function syncOrderLineItems(orderNum, quoteNum, dealId) {
+    // Step 1: Purge QuoteProdMix — Order is the sole source of truth
+    try {
+      await fastify.quoteProdMixService.purgeQuoteProdMixItems(dealId);
+    } catch (error) {
+      fastify.log.warn(`Order ${orderNum}: Failed to purge QuoteProdMix on deal ${dealId}: ${error.message}`);
+    }
+
+    // Step 2: Reconcile OrderProdMix line items
+    try {
+      await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
+    } catch (error) {
+      fastify.log.warn(`Order ${orderNum}: Failed to sync OrderProdMix items: ${error.message}`);
+    }
+
+    // Step 3: Sync QSeatEtab using the associated QuoteNum
+    if (quoteNum) {
+      try {
+        await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
+      } catch (error) {
+        fastify.log.warn(`Order ${orderNum}: Failed to sync QSeatEtab items (quote ${quoteNum}): ${error.message}`);
+      }
+    } else {
+      fastify.log.debug(`Order ${orderNum}: No QuoteNum — skipping QSeatEtab sync`);
+    }
+
+    // Step 4: Final cross-source dedup safety net
+    await deduplicateDealLineItems(dealId);
   }
 
   async function processOrdersIndividually(orders, results) {
@@ -308,11 +377,7 @@ async function orderService(fastify, _) {
               timestamp: new Date()
             });
 
-            try {
-              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, newDealId);
-            } catch (lineItemError) {
-              fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
-            }
+            await syncOrderLineItems(orderNum, quoteNum, newDealId);
 
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
             await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
@@ -337,11 +402,7 @@ async function orderService(fastify, _) {
             });
           }
 
-          try {
-            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
-          } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
-          }
+          await syncOrderLineItems(orderNum, quoteNum, dealId);
 
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
@@ -364,11 +425,7 @@ async function orderService(fastify, _) {
             timestamp: new Date()
           });
 
-          try {
-            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
-          } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
-          }
+          await syncOrderLineItems(orderNum, quoteNum, dealId);
 
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
@@ -456,6 +513,8 @@ export default fp(orderService, {
   dependencies: [
     'orderRepository',
     'orderProdMixService',
+    'quoteProdMixService',
+    'qSeatEtabService',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

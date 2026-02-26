@@ -55,16 +55,7 @@ async function syncService(fastify, _) {
         syncLog.errors++;
       }
 
-      try {
-        fastify.log.info('Starting orders sync...');
-        results.orders = await fastify.orderTask.task(dateString);
-        syncLog.recordsProcessed += results.orders?.syncedCount || 0;
-        syncLog.errors += results.orders?.errorCount || 0;
-      } catch (error) {
-        fastify.log.error(`Orders sync failed: ${error.message}`);
-        syncLog.errors++;
-      }
-
+      // Quotes phase: Quotes → QuoteProdMix → QSeatEtab (handled within quoteTask)
       try {
         fastify.log.info('Starting quotes sync...');
         results.quotes = await fastify.quoteTask.task(dateString);
@@ -72,6 +63,18 @@ async function syncService(fastify, _) {
         syncLog.errors += results.quotes?.errorCount || 0;
       } catch (error) {
         fastify.log.error(`Quotes sync failed: ${error.message}`);
+        syncLog.errors++;
+      }
+
+      // Orders phase: Orders → OrderProdMix → QSeatEtab (handled within orderTask)
+      // Must run AFTER quotes are fully complete
+      try {
+        fastify.log.info('Starting orders sync...');
+        results.orders = await fastify.orderTask.task(dateString);
+        syncLog.recordsProcessed += results.orders?.syncedCount || 0;
+        syncLog.errors += results.orders?.errorCount || 0;
+      } catch (error) {
+        fastify.log.error(`Orders sync failed: ${error.message}`);
         syncLog.errors++;
       }
 

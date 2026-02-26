@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin';
-import { reconcileLineItems } from '../../shared/lineItemReconciliation.js';
+import { reconcileLineItems, deduplicateDesiredItems, buildMatchKey } from '../../shared/lineItemReconciliation.js';
 
 const toSingleLineText = (value) => {
   if (value == null) return null;
@@ -115,7 +115,13 @@ async function orderProdMixService(fastify, _) {
   async function reconcileAndSync(epicorRecords, dealId) {
     const results = { created: 0, deleted: 0, unchanged: 0, errors: 0 };
 
-    const desiredItems = epicorRecords.map(buildCleanProperties);
+    // Deduplicate desired items by Name + Amount before reconciliation
+    const rawDesired = epicorRecords.map(buildCleanProperties);
+    const desiredItems = deduplicateDesiredItems(rawDesired, (item) => buildMatchKey(item.name, item.price));
+    if (rawDesired.length !== desiredItems.length) {
+      fastify.log.info(`OrderProdMix: Deduped desired items from ${rawDesired.length} to ${desiredItems.length} by name+amount`);
+    }
+
     const allExisting = dealId ? await fetchExistingLineItems(dealId) : [];
     const sourceItems = filterOrderProdMixItems(allExisting);
 
