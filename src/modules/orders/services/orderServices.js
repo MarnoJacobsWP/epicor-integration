@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
+import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
 
 const toMidnightUTC = (v) => {
   const d = new Date(v);
@@ -110,6 +111,36 @@ async function orderService(fastify, _) {
     return await fastify.orderRepository.deleteDatabase(filter);
   }
 
+  /** Dedup properties needed for cross-source duplicate detection. */
+  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'hs_sku'];
+
+  /**
+   * Fetches all line items on a deal and deletes cross-source duplicates.
+   * Duplicates are detected by name+price (ProdMix) or name+sku (QSeatEtab).
+   */
+  async function deduplicateDealLineItems(dealId, context = '') {
+    try {
+      const allItems = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getLineItemsForDeal(dealId, DEDUP_FETCH_PROPERTIES)
+      );
+      const duplicates = findDuplicatesOnDeal(allItems);
+      if (!duplicates.length) return;
+
+      fastify.log.info(`${context}: Found ${duplicates.length} duplicate line items on deal ${dealId}, removing...`);
+      for (const dup of duplicates) {
+        try {
+          await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(dup.id));
+          await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(dup.id) }).catch(() => {});
+          fastify.log.info(`Deleted duplicate line item ${dup.id} from deal ${dealId}`);
+        } catch (error) {
+          fastify.log.warn(`Failed to delete duplicate line item ${dup.id}: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      fastify.log.warn(`${context}: Failed cross-source dedup on deal ${dealId}: ${error.message}`);
+    }
+  }
+
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
     if (HUBSPOT_ASSOCIATIONS.DEAL_TO_COMPANY == null) {
@@ -159,6 +190,9 @@ async function orderService(fastify, _) {
       } catch (qSeatError) {
         fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum} on order deal: ${qSeatError.message}`);
       }
+
+      // Final cross-source dedup pass
+      await deduplicateDealLineItems(quoteDealId, `order ${orderNum} (quote deal ${quoteNum})`);
     } catch (quoteUpdateError) {
       fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
     }
@@ -334,6 +368,9 @@ async function orderService(fastify, _) {
               }
             }
 
+            // Final cross-source dedup pass
+            await deduplicateDealLineItems(newDealId, `order ${orderNum}`);
+
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
             await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
@@ -373,6 +410,9 @@ async function orderService(fastify, _) {
             }
           }
 
+          // Final cross-source dedup pass
+          await deduplicateDealLineItems(dealId, `order ${orderNum}`);
+
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
@@ -409,6 +449,9 @@ async function orderService(fastify, _) {
               fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
             }
           }
+
+          // Final cross-source dedup pass
+          await deduplicateDealLineItems(dealId, `order ${orderNum}`);
 
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);

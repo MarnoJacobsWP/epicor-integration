@@ -1,4 +1,5 @@
 import fp from 'fastify-plugin';
+import { reconcileLineItems, buildMatchKey, deduplicateDesiredItems } from '../../shared/lineItemReconciliation.js';
 
 const FIELD_MAPPINGS = [
   { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },//Quote Num
@@ -9,13 +10,21 @@ const FIELD_MAPPINGS = [
   { epicor: 'RowIdent', hubspot: 'rowident' },//Row Ident
 ];
 
-/**
- * Properties used to determine if a line item already exists on a deal.
- * If ALL of these HubSpot properties match an existing line item, it is skipped.
- * Order/quote numbers are intentionally ignored to dedupe across order/quote syncs.
- */
-const DEDUP_PROPERTIES = ['name', 'hs_sku'];
+/** Properties fetched from HubSpot for source filtering and dedup comparison. */
+const FETCH_PROPERTIES = ['name', 'hs_sku', 'quotedtl_quotenum'];
 const ALLOWED_PROD_GROUPS = new Set(['E-Tables', 'New Seating']);
+
+/**
+ * Custom key functions for QSeatEtab reconciliation.
+ * QSeatEtab items use name + hs_sku for matching (they have no price field).
+ */
+const QSEAT_ETAB_KEY_OPTIONS = {
+  desiredKeyFn: (item) => buildMatchKey(item.name, item.hs_sku),
+  existingKeyFn: (item) => {
+    const props = item.properties || {};
+    return buildMatchKey(props.name, props.hs_sku);
+  },
+};
 
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
@@ -29,19 +38,34 @@ function transformEpicorToHubSpot(epicorRecord) {
   return result;
 }
 
+function buildCleanProperties(epicorRecord) {
+  const props = transformEpicorToHubSpot(epicorRecord);
+
+  if (props.prodgrup_description && !ALLOWED_PROD_GROUPS.has(props.prodgrup_description)) {
+    delete props.prodgrup_description;
+  }
+
+  props.name = props.prodgrup_description || 'Unnamed Product';
+  props.hs_sku = props.quotedtl_partnum;
+  props.description = props.quotedtl_linedesc;
+
+  const clean = {};
+  for (const [key, value] of Object.entries(props)) {
+    if (value != null) clean[key] = value;
+  }
+  return clean;
+}
+
 /**
- * Checks whether a set of properties matches any existing HubSpot line item.
- * Returns the matching HubSpot line item or null.
+ * Filters HubSpot line items to only those originating from QSeatEtab.
+ * QSeatEtab items are identified by having hs_sku set
+ * (QuoteProdMix items lack hs_sku; OrderProdMix items lack quotedtl_quotenum).
  */
-function findMatchingLineItem(existingLineItems, candidateProps) {
-  return existingLineItems.find((existing) => {
-    const hsProps = existing.properties || {};
-    return DEDUP_PROPERTIES.every((key) => {
-      const candidateVal = String(candidateProps[key] ?? '').trim();
-      const existingVal = String(hsProps[key] ?? '').trim();
-      return candidateVal === existingVal;
-    });
-  }) || null;
+function filterQSeatEtabItems(lineItems) {
+  return lineItems.filter((item) => {
+    const hsSku = item.properties?.hs_sku;
+    return hsSku != null && String(hsSku).trim() !== '';
+  });
 }
 
 function isEntitySetDescriptor(records) {
@@ -91,18 +115,10 @@ async function fetchQSeatEtabRecordsForQuote(fastify, quoteNum) {
 async function qSeatEtabService(fastify, _) {
   const { HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
-  async function createDataBase(data) {
-    return await fastify.lineItemRepository.insertDatabase(data);
-  }
-
-  /**
-   * Fetches existing HubSpot line items for a deal to compare properties
-   * for dedup instead of relying on RowIdent (which changes each Epicor pull).
-   */
   async function fetchExistingLineItems(dealId) {
     try {
       return await fastify.backoff(() =>
-        fastify.hubspotAdapter.getLineItemsForDeal(dealId, DEDUP_PROPERTIES)
+        fastify.hubspotAdapter.getLineItemsForDeal(dealId, FETCH_PROPERTIES)
       );
     } catch (error) {
       fastify.log.warn(`Failed to fetch existing line items for deal ${dealId}: ${error.message}`);
@@ -110,119 +126,112 @@ async function qSeatEtabService(fastify, _) {
     }
   }
 
-  async function processLineItemsIndividually(lineItems, dealId, results) {
-    fastify.log.info(`Processing ${lineItems.length} QSeatEtab line items for deal ${dealId}`);
+  async function deleteHubSpotLineItem(lineItemId) {
+    await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(lineItemId));
+    await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(lineItemId) }).catch(() => {});
+  }
 
-    const existingLineItems = dealId ? await fetchExistingLineItems(dealId) : [];
-    fastify.log.info(`Found ${existingLineItems.length} existing line items on deal ${dealId}`);
-
-    for (const lineItem of lineItems) {
-      const quoteNum = lineItem.QuoteDtl_QuoteNum;
-      const epicorId = lineItem.RowIdent
-        || lineItem.SysRowID
-        || lineItem.QuoteDtl_SysRowID
-        || `${quoteNum}|${lineItem.QuoteDtl_PartNum || ''}|${lineItem.QuoteDtl_LineDesc || ''}|${lineItem.QuoteDtl_OrderQty || ''}`
-        || null;
-
-      try {
-        const props = transformEpicorToHubSpot(lineItem);
-
-        if (props.prodgrup_description && !ALLOWED_PROD_GROUPS.has(props.prodgrup_description)) {
-          fastify.log.warn(`Invalid prodgrup_description "${props.prodgrup_description}" for quote ${quoteNum}; omitting value`);
-          delete props.prodgrup_description;
-        }
-
-        props.name = props.prodgrup_description || 'Unnamed Product';
-        props.hs_sku = props.quotedtl_partnum;
-        props.description = props.quotedtl_linedesc;
-
-        const cleanProps = {};
-        for (const [key, value] of Object.entries(props)) {
-          if (value != null) cleanProps[key] = value;
-        }
-
-        // Check for matching existing line item by properties
-        const match = findMatchingLineItem(existingLineItems, cleanProps);
-        if (match) {
-          const lineItemId = match.id;
-          await fastify.backoff(() =>
-            fastify.hubspotAdapter.updateLineItem({ lineItemId, properties: cleanProps })
-          );
-
-          if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
-            await fastify.hubspotAdapter.ensureAssociation(
-              'line_items',
-              lineItemId,
-              'deals',
-              dealId,
-              HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
-            );
-          }
-
-          if (epicorId) {
-            await fastify.lineItemRepository.updateDatabase(
-              { epicorId: String(epicorId) },
-              {
-                hubspotId: lineItemId,
-                source: 'EpicorQSeatEtab',
-                quoteNum,
-                action: 'update',
-              }
-            );
-          }
-
-          fastify.log.info(`QSeatEtab line item for quote ${quoteNum} updated on existing HubSpot line item ${lineItemId}`);
-          results.updated++;
-          continue;
-        }
-
-        // No match found — create new line item
-        if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL == null) {
-          throw new Error('Missing HUBSPOT_ASSOCIATION_LINE_ITEM_TO_DEAL for line item associations');
-        }
-
-        const associations = dealId ? [{
+  async function createHubSpotLineItem(properties, dealId) {
+    const associations = dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null
+      ? [{
           to: { id: dealId },
-          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL }]
-        }] : [];
+          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL }],
+        }]
+      : [];
 
-        const created = await fastify.backoff(() =>
-          fastify.hubspotAdapter.createLineItem({ properties: cleanProps, associations })
-        );
-        const lineItemId = created.id;
+    const created = await fastify.backoff(() =>
+      fastify.hubspotAdapter.createLineItem({ properties, associations })
+    );
 
-        if (dealId && HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL != null) {
-          await fastify.hubspotAdapter.ensureAssociation(
-            'line_items',
-            lineItemId,
-            'deals',
-            dealId,
-            HUBSPOT_ASSOCIATIONS.LINE_ITEM_TO_DEAL
-          );
-        }
+    const epicorId = properties.rowident
+      || `${properties.quotedtl_quotenum}|${properties.hs_sku || ''}|${properties.name || ''}`;
 
-        const resolvedEpicorId = epicorId || lineItemId;
+    await fastify.lineItemRepository.insertDatabase({
+      epicorId: String(epicorId),
+      hubspotId: created.id,
+      source: 'EpicorQSeatEtab',
+      quoteNum: properties.quotedtl_quotenum,
+      action: 'create',
+    }).catch(() =>
+      fastify.lineItemRepository.updateDatabase(
+        { epicorId: String(epicorId) },
+        { hubspotId: created.id, source: 'EpicorQSeatEtab', quoteNum: properties.quotedtl_quotenum, action: 'create' },
+      ).catch(() => {})
+    );
 
-        await createDataBase({
-          epicorId: String(resolvedEpicorId),
-          hubspotId: lineItemId,
-          source: 'EpicorQSeatEtab',
-          quoteNum,
-          action: 'create'
-        });
+    return created;
+  }
 
-        // Track the newly created item so subsequent items in this batch can dedup against it
-        existingLineItems.push({ id: lineItemId, properties: { ...cleanProps } });
+  /**
+   * Reconciles Epicor QSeatEtab records against HubSpot line items.
+   * Uses multiset matching on name + hs_sku to determine creates, updates, and deletes.
+   */
+  async function reconcileAndSync(epicorRecords, dealId) {
+    const results = { created: 0, updated: 0, deleted: 0, unchanged: 0, errors: 0 };
 
-        results.created++;
+    const rawDesired = epicorRecords.map(buildCleanProperties);
+    const desiredItems = deduplicateDesiredItems(rawDesired, QSEAT_ETAB_KEY_OPTIONS.desiredKeyFn);
 
+    if (rawDesired.length !== desiredItems.length) {
+      fastify.log.info(`QSeatEtab: Deduped desired items from ${rawDesired.length} to ${desiredItems.length} by name+sku`);
+    }
+
+    const allExisting = dealId ? await fetchExistingLineItems(dealId) : [];
+    const sourceItems = filterQSeatEtabItems(allExisting);
+
+    fastify.log.info(
+      `Deal ${dealId}: ${allExisting.length} total line items, ${sourceItems.length} QSeatEtab, ${desiredItems.length} desired from Epicor`
+    );
+
+    const { toCreate, toUpdate, toDelete, unchangedCount } = reconcileLineItems(
+      desiredItems,
+      sourceItems,
+      QSEAT_ETAB_KEY_OPTIONS
+    );
+    results.unchanged = unchangedCount;
+
+    // Delete stale QSeatEtab items no longer present in Epicor
+    for (const item of toDelete) {
+      try {
+        await deleteHubSpotLineItem(item.id);
+        fastify.log.info(`Deleted stale QSeatEtab line item ${item.id} from deal ${dealId}`);
+        results.deleted++;
       } catch (error) {
-        fastify.log.error(`QSeatEtab line item for quote ${quoteNum} failed: ${error.message}`);
+        fastify.log.error(`Failed to delete QSeatEtab line item ${item.id}: ${error.message}`);
         results.errors++;
       }
     }
 
-    fastify.log.info(`QSeatEtab processing complete: ${results.created} created, ${results.skipped} skipped, ${results.errors} errors`);
+    // Update matched items with fresh properties
+    for (const { existingId, properties } of toUpdate) {
+      try {
+        await fastify.backoff(() =>
+          fastify.hubspotAdapter.updateLineItem({ lineItemId: existingId, properties })
+        );
+        fastify.log.info(`Updated QSeatEtab line item ${existingId} on deal ${dealId}`);
+        results.updated++;
+      } catch (error) {
+        fastify.log.error(`Failed to update QSeatEtab line item ${existingId}: ${error.message}`);
+        results.errors++;
+      }
+    }
+
+    // Create new items
+    for (const properties of toCreate) {
+      try {
+        const created = await createHubSpotLineItem(properties, dealId);
+        fastify.log.info(`Created QSeatEtab line item ${created.id} on deal ${dealId}`);
+        results.created++;
+      } catch (error) {
+        fastify.log.error(`Failed to create QSeatEtab line item on deal ${dealId}: ${error.message}`);
+        results.errors++;
+      }
+    }
+
+    fastify.log.info(
+      `QSeatEtab reconciliation for deal ${dealId}: ${results.created} created, ${results.updated} updated, ${results.deleted} deleted, ${results.unchanged} unchanged, ${results.errors} errors`
+    );
+    return results;
   }
 
   async function syncLineItemsForQuoteWithData(quoteNum, dealId, quoteRecords) {
@@ -249,25 +258,16 @@ async function qSeatEtabService(fastify, _) {
 
     fastify.log.info(`Found ${quoteRecords.length} QSeatEtab records, deduplicated to ${uniqueRecords.length} for quote ${quoteNum}`);
 
-    const results = {
-      total: uniqueRecords.length,
-      created: 0,
-      updated: 0,
-      errors: 0,
-      skipped: 0,
-    };
-
-    await processLineItemsIndividually(uniqueRecords, dealId, results);
-
-    fastify.log.info(`QSeatEtab sync for quote ${quoteNum} complete: ${results.created} created, ${results.skipped} skipped, ${results.errors} errors`);
+    const results = await reconcileAndSync(uniqueRecords, dealId);
 
     return {
       success: true,
       lineItemCount: uniqueRecords.length,
       createdCount: results.created,
       updatedCount: results.updated,
+      deletedCount: results.deleted,
+      unchangedCount: results.unchanged,
       errorCount: results.errors,
-      skippedCount: results.skipped
     };
   }
 
