@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin';
-import { reconcileLineItems, buildMatchKey, deduplicateDesiredItems } from '../../shared/lineItemReconciliation.js';
+import { reconcileLineItems } from '../../shared/lineItemReconciliation.js';
 
 const toSingleLineText = (value) => {
   if (value == null) return null;
@@ -12,7 +12,6 @@ const FIELD_MAPPINGS = [
   { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toSingleLineText },//Product Group
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },//Unit Price
 ];
-
 /** Properties fetched from HubSpot for source filtering and comparison. */
 const FETCH_PROPERTIES = ['name', 'price', 'quotedtl_quotenum', 'hs_sku'];
 
@@ -70,7 +69,7 @@ function filterQuoteProdMixItems(lineItems) {
 }
 
 async function quoteProdMixService(fastify, _) {
-  const { ENDPOINTS, HUBSPOT_ASSOCIATIONS } = fastify.constants;
+  const { HUBSPOT_ASSOCIATIONS } = fastify.constants;
 
   async function fetchExistingLineItems(dealId) {
     try {
@@ -118,46 +117,10 @@ async function quoteProdMixService(fastify, _) {
     return created;
   }
 
-  /**
-   * Purges any QuoteProdMix-sourced line items from a deal.
-   * Called when the deal has an order — only OrderProdMix + QSeatEtab should remain.
-   * QuoteProdMix items are identified by having quotedtl_quotenum set and hs_sku NOT set.
-   */
-  async function purgeQuoteProdMixItems(dealId, quoteNum) {
-    try {
-      const allItems = await fetchExistingLineItems(dealId);
-      const quoteProdMixItems = filterQuoteProdMixItems(allItems);
-
-      if (!quoteProdMixItems.length) return { deleted: 0 };
-
-      fastify.log.info(`Purging ${quoteProdMixItems.length} QuoteProdMix line items from deal ${dealId} (quote ${quoteNum})`);
-      let deleted = 0;
-      for (const item of quoteProdMixItems) {
-        try {
-          await deleteHubSpotLineItem(item.id);
-          fastify.log.info(`Purged QuoteProdMix line item ${item.id} from deal ${dealId}`);
-          deleted++;
-        } catch (error) {
-          fastify.log.warn(`Failed to purge QuoteProdMix line item ${item.id}: ${error.message}`);
-        }
-      }
-      return { deleted };
-    } catch (error) {
-      fastify.log.warn(`Failed to purge QuoteProdMix items from deal ${dealId}: ${error.message}`);
-      return { deleted: 0 };
-    }
-  }
-
   async function reconcileAndSync(epicorRecords, dealId) {
     const results = { created: 0, deleted: 0, unchanged: 0, errors: 0 };
 
-    const rawDesired = epicorRecords.map(buildCleanProperties);
-    const desiredItems = deduplicateDesiredItems(rawDesired, (item) => buildMatchKey(item.name, item.price));
-
-    if (rawDesired.length !== desiredItems.length) {
-      fastify.log.info(`QuoteProdMix: Deduped desired items from ${rawDesired.length} to ${desiredItems.length} by name+price`);
-    }
-
+    const desiredItems = epicorRecords.map(buildCleanProperties);
     const allExisting = dealId ? await fetchExistingLineItems(dealId) : [];
     const sourceItems = filterQuoteProdMixItems(allExisting);
 
@@ -227,73 +190,10 @@ async function quoteProdMixService(fastify, _) {
 
   async function task(dateString) {
     try {
-      fastify.log.info('Processing independent QuoteProdMix Calculated_Time trigger...');
-
-      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(
-        ENDPOINTS.QUOTE_PROD_MIX
-      );
-
-      if (!records?.length) {
-        fastify.log.info('No recently changed QuoteProdMix records found');
-        return { success: true, message: 'No QuoteProdMix changes detected', metadata };
-      }
-
-      // Group records by quote number
-      const byQuote = new Map();
-      for (const record of records) {
-        const quoteNum = record.QuoteDtl_QuoteNum;
-        if (!quoteNum) continue;
-        if (!byQuote.has(quoteNum)) byQuote.set(quoteNum, []);
-        byQuote.get(quoteNum).push(record);
-      }
-
-      fastify.log.info(`QuoteProdMix trigger: ${records.length} records across ${byQuote.size} quotes`);
-
-      const results = { synced: 0, skipped: 0, errors: 0 };
-
-      for (const [quoteNum, quoteRecords] of byQuote) {
-        try {
-          // Find the HubSpot deal for this quote
-          const searchData = await fastify.backoff(() =>
-            fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
-          );
-          const deal = searchData.results?.[0];
-
-          if (!deal?.id) {
-            fastify.log.debug(`QuoteProdMix trigger: No deal found for quote ${quoteNum}, skipping`);
-            results.skipped++;
-            continue;
-          }
-
-          // Deal source check: if deal has an order number, order takes precedence — purge any existing QuoteProdMix items
-          const dealProps = deal.properties || {};
-          const hasOrder = dealProps.orderhed_ordernum
-            && String(dealProps.orderhed_ordernum).trim() !== '';
-          if (hasOrder) {
-            fastify.log.info(
-              `QuoteProdMix trigger: Deal ${deal.id} for quote ${quoteNum} has order ${dealProps.orderhed_ordernum} — order takes precedence, purging QuoteProdMix items`
-            );
-            await purgeQuoteProdMixItems(deal.id, quoteNum);
-            results.skipped++;
-            continue;
-          }
-
-          const dealId = deal.id;
-          const uniqueRecords = deduplicateEpicorRecords(quoteRecords);
-
-          await reconcileAndSync(uniqueRecords, dealId);
-          fastify.log.info(`QuoteProdMix trigger: Reconciled ${uniqueRecords.length} items for quote ${quoteNum} (deal ${dealId})`);
-          results.synced++;
-        } catch (error) {
-          fastify.log.error(`QuoteProdMix trigger failed for quote ${quoteNum}: ${error.message}`);
-          results.errors++;
-        }
-      }
-
-      fastify.log.info(`QuoteProdMix trigger complete: ${results.synced} synced, ${results.skipped} skipped, ${results.errors} errors`);
-      return { success: true, ...results, metadata };
+      fastify.log.info('Processing Tasks for Quote Line Items');
+      return { success: true, message: 'Quote line items processed by quote service' };
     } catch (error) {
-      fastify.log.error(`Error processing QuoteProdMix trigger: ${error.message}`);
+      fastify.log.error(`Error processing Tasks for Quote Line Items: ${error.message}`);
       throw error;
     }
   }
@@ -301,7 +201,6 @@ async function quoteProdMixService(fastify, _) {
   if (!fastify.hasDecorator('quoteProdMixService')) {
     fastify.decorate('quoteProdMixService', {
       syncLineItemsForQuote,
-      purgeQuoteProdMixItems,
       task,
     });
   }

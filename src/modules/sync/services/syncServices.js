@@ -41,10 +41,8 @@ async function syncService(fastify, _) {
 
       const results = {
         customers: null,
-        quotes: null,
-        quoteProdMix: null,
         orders: null,
-        orderProdMix: null,
+        quotes: null,
       };
 
       try {
@@ -54,26 +52,6 @@ async function syncService(fastify, _) {
         syncLog.errors += results.customers?.errorCount || 0;
       } catch (error) {
         fastify.log.error(`Customers sync failed: ${error.message}`);
-        syncLog.errors++;
-      }
-
-      try {
-        fastify.log.info('Starting quotes sync...');
-        results.quotes = await fastify.quoteTask.task(dateString);
-        syncLog.recordsProcessed += results.quotes?.syncedCount || 0;
-        syncLog.errors += results.quotes?.errorCount || 0;
-      } catch (error) {
-        fastify.log.error(`Quotes sync failed: ${error.message}`);
-        syncLog.errors++;
-      }
-
-      try {
-        fastify.log.info('Starting QuoteProdMix independent trigger...');
-        results.quoteProdMix = await fastify.quoteProdMixService.task(dateString);
-        syncLog.recordsProcessed += results.quoteProdMix?.synced || 0;
-        syncLog.errors += results.quoteProdMix?.errors || 0;
-      } catch (error) {
-        fastify.log.error(`QuoteProdMix trigger failed: ${error.message}`);
         syncLog.errors++;
       }
 
@@ -88,12 +66,12 @@ async function syncService(fastify, _) {
       }
 
       try {
-        fastify.log.info('Starting OrderProdMix independent trigger...');
-        results.orderProdMix = await fastify.orderProdMixService.task(dateString);
-        syncLog.recordsProcessed += results.orderProdMix?.synced || 0;
-        syncLog.errors += results.orderProdMix?.errors || 0;
+        fastify.log.info('Starting quotes sync...');
+        results.quotes = await fastify.quoteTask.task(dateString);
+        syncLog.recordsProcessed += results.quotes?.syncedCount || 0;
+        syncLog.errors += results.quotes?.errorCount || 0;
       } catch (error) {
-        fastify.log.error(`OrderProdMix trigger failed: ${error.message}`);
+        fastify.log.error(`Quotes sync failed: ${error.message}`);
         syncLog.errors++;
       }
 
@@ -171,7 +149,5 @@ export default fp(syncService, {
     'customerServices',
     'orderServices',
     'quoteServices',
-    'orderProdMixService',
-    'quoteProdMixService',
   ],
 });

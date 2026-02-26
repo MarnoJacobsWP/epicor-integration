@@ -1,6 +1,5 @@
 import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
-import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
 
 const toMidnightUTC = (v) => {
   const d = new Date(v);
@@ -111,36 +110,6 @@ async function orderService(fastify, _) {
     return await fastify.orderRepository.deleteDatabase(filter);
   }
 
-  /** Dedup properties needed for cross-source duplicate detection. */
-  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'hs_sku'];
-
-  /**
-   * Fetches all line items on a deal and deletes cross-source duplicates.
-   * Duplicates are detected by name+price (ProdMix) or name+sku (QSeatEtab).
-   */
-  async function deduplicateDealLineItems(dealId, context = '') {
-    try {
-      const allItems = await fastify.backoff(() =>
-        fastify.hubspotAdapter.getLineItemsForDeal(dealId, DEDUP_FETCH_PROPERTIES)
-      );
-      const duplicates = findDuplicatesOnDeal(allItems);
-      if (!duplicates.length) return;
-
-      fastify.log.info(`${context}: Found ${duplicates.length} duplicate line items on deal ${dealId}, removing...`);
-      for (const dup of duplicates) {
-        try {
-          await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(dup.id));
-          await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(dup.id) }).catch(() => {});
-          fastify.log.info(`Deleted duplicate line item ${dup.id} from deal ${dealId}`);
-        } catch (error) {
-          fastify.log.warn(`Failed to delete duplicate line item ${dup.id}: ${error.message}`);
-        }
-      }
-    } catch (error) {
-      fastify.log.warn(`${context}: Failed cross-source dedup on deal ${dealId}: ${error.message}`);
-    }
-  }
-
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
     if (HUBSPOT_ASSOCIATIONS.DEAL_TO_COMPANY == null) {
@@ -175,31 +144,11 @@ async function orderService(fastify, _) {
       }
       
       try {
-        // Quote deal has both quote and order — order takes precedence.
-        // clearAll removes all existing line items (QuoteProdMix, etc.)
-        // before recreating from OrderProdMix.
-        await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId, { clearAll: true });
-        fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data (cleared all previous)`);
+        await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, quoteDealId);
+        fastify.log.info(`Updated line items for quote ${quoteNum} with order ${orderNum} data`);
       } catch (quoteLineItemError) {
-        fastify.log.warn(`Failed to sync OrderProdMix line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
+        fastify.log.warn(`Failed to sync line items for quote ${quoteNum}: ${quoteLineItemError.message}`);
       }
-
-      // QSeatEtab is always processed when a quoteNum is available
-      try {
-        await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, quoteDealId);
-      } catch (qSeatError) {
-        fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum} on order deal: ${qSeatError.message}`);
-      }
-
-      // Purge any remaining QuoteProdMix items — order takes full precedence
-      try {
-        await fastify.quoteProdMixService.purgeQuoteProdMixItems(quoteDealId, quoteNum);
-      } catch (purgeError) {
-        fastify.log.warn(`Failed to purge QuoteProdMix items on quote deal ${quoteDealId}: ${purgeError.message}`);
-      }
-
-      // Final cross-source dedup pass
-      await deduplicateDealLineItems(quoteDealId, `order ${orderNum} (quote deal ${quoteNum})`);
     } catch (quoteUpdateError) {
       fastify.log.warn(`Failed to update matching quote ${quoteNum} for order ${orderNum}: ${quoteUpdateError.message}`);
     }
@@ -360,30 +309,10 @@ async function orderService(fastify, _) {
             });
 
             try {
-              // clearAll when deal has both quote and order — order takes precedence
-              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, newDealId, quoteNum ? { clearAll: true } : {});
+              await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, newDealId);
             } catch (lineItemError) {
-              fastify.log.warn(`Failed to sync OrderProdMix line items for order ${orderNum}: ${lineItemError.message}`);
+              fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
             }
-
-            // QSeatEtab is always processed when a quoteNum is available
-            if (quoteNum) {
-              try {
-                await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, newDealId);
-              } catch (qSeatError) {
-                fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
-              }
-
-              // Purge any remaining QuoteProdMix items — order takes full precedence
-              try {
-                await fastify.quoteProdMixService.purgeQuoteProdMixItems(newDealId, quoteNum);
-              } catch (purgeError) {
-                fastify.log.warn(`Failed to purge QuoteProdMix items for order ${orderNum}: ${purgeError.message}`);
-              }
-            }
-
-            // Final cross-source dedup pass
-            await deduplicateDealLineItems(newDealId, `order ${orderNum}`);
 
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
             await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
@@ -409,30 +338,10 @@ async function orderService(fastify, _) {
           }
 
           try {
-            // clearAll when deal has both quote and order — order takes precedence
-            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId, quoteNum ? { clearAll: true } : {});
+            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
           } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync OrderProdMix line items for order ${orderNum}: ${lineItemError.message}`);
+            fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
-
-          // QSeatEtab is always processed when a quoteNum is available
-          if (quoteNum) {
-            try {
-              await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
-            } catch (qSeatError) {
-              fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
-            }
-
-            // Purge any remaining QuoteProdMix items — order takes full precedence
-            try {
-              await fastify.quoteProdMixService.purgeQuoteProdMixItems(dealId, quoteNum);
-            } catch (purgeError) {
-              fastify.log.warn(`Failed to purge QuoteProdMix items for order ${orderNum}: ${purgeError.message}`);
-            }
-          }
-
-          // Final cross-source dedup pass
-          await deduplicateDealLineItems(dealId, `order ${orderNum}`);
 
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
@@ -456,30 +365,10 @@ async function orderService(fastify, _) {
           });
 
           try {
-            // clearAll when deal has both quote and order — order takes precedence
-            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId, quoteNum ? { clearAll: true } : {});
+            await fastify.orderProdMixService.syncLineItemsForOrder(orderNum, dealId);
           } catch (lineItemError) {
-            fastify.log.warn(`Failed to sync OrderProdMix line items for order ${orderNum}: ${lineItemError.message}`);
+            fastify.log.warn(`Failed to sync line items for order ${orderNum}: ${lineItemError.message}`);
           }
-
-          // QSeatEtab is always processed when a quoteNum is available
-          if (quoteNum) {
-            try {
-              await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
-            } catch (qSeatError) {
-              fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
-            }
-
-            // Purge any remaining QuoteProdMix items — order takes full precedence
-            try {
-              await fastify.quoteProdMixService.purgeQuoteProdMixItems(dealId, quoteNum);
-            } catch (purgeError) {
-              fastify.log.warn(`Failed to purge QuoteProdMix items for order ${orderNum}: ${purgeError.message}`);
-            }
-          }
-
-          // Final cross-source dedup pass
-          await deduplicateDealLineItems(dealId, `order ${orderNum}`);
 
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
@@ -567,8 +456,6 @@ export default fp(orderService, {
   dependencies: [
     'orderRepository',
     'orderProdMixService',
-    'quoteProdMixService',
-    'qSeatEtabService',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',
