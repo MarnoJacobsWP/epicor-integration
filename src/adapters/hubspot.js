@@ -137,7 +137,7 @@ class HubspotAdapter {
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
         const response = await this._scheduleRequest(() => this.client(config));
-        if (!response?.data) {
+        if (method.toUpperCase() !== 'DELETE' && !response?.data) {
           throw new Error('HubSpot response missing data');
         }
         return response;
@@ -630,6 +630,10 @@ class HubspotAdapter {
       properties: normalizeProperties(properties),
     });
     return response.data;
+  }
+
+  async deleteLineItem(lineItemId) {
+    await this._makeRequest('DELETE', `/crm/v3/objects/line_items/${lineItemId}`);
   }
 
   async searchCompanies({ body }) {
