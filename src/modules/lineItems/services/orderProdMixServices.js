@@ -17,6 +17,9 @@ const FIELD_MAPPINGS = [
 /** Properties fetched from HubSpot for source filtering and comparison. */
 const FETCH_PROPERTIES = ['name', 'price', 'orderdtl_ordernum'];
 
+/** Broader property set used during clearAll to ensure all line items are found. */
+const CLEAR_ALL_FETCH_PROPERTIES = ['name', 'price', 'orderdtl_ordernum', 'quotedtl_quotenum', 'hs_sku'];
+
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
   for (const { epicor, hubspot, transform } of FIELD_MAPPINGS) {
@@ -69,6 +72,17 @@ async function orderProdMixService(fastify, _) {
     try {
       return await fastify.backoff(() =>
         fastify.hubspotAdapter.getLineItemsForDeal(dealId, FETCH_PROPERTIES)
+      );
+    } catch (error) {
+      fastify.log.warn(`Failed to fetch existing line items for deal ${dealId}: ${error.message}`);
+      return [];
+    }
+  }
+
+  async function fetchExistingLineItemsWithProperties(dealId, properties) {
+    try {
+      return await fastify.backoff(() =>
+        fastify.hubspotAdapter.getLineItemsForDeal(dealId, properties)
       );
     } catch (error) {
       fastify.log.warn(`Failed to fetch existing line items for deal ${dealId}: ${error.message}`);
@@ -135,11 +149,13 @@ async function orderProdMixService(fastify, _) {
 
     if (clearAll) {
       // Order takes precedence: nuke every line item on the deal, then recreate.
+      // Use broader property fetch to make sure we find ALL items (including QuoteProdMix).
+      const clearExisting = dealId ? await fetchExistingLineItemsWithProperties(dealId, CLEAR_ALL_FETCH_PROPERTIES) : [];
       fastify.log.info(
-        `Deal ${dealId}: clearAll mode — removing all ${allExisting.length} existing line items before OrderProdMix sync`
+        `Deal ${dealId}: clearAll mode — removing all ${clearExisting.length} existing line items before OrderProdMix sync`
       );
 
-      for (const item of allExisting) {
+      for (const item of clearExisting) {
         try {
           await deleteHubSpotLineItem(item.id);
           results.deleted++;

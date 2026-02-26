@@ -118,6 +118,36 @@ async function quoteProdMixService(fastify, _) {
     return created;
   }
 
+  /**
+   * Purges any QuoteProdMix-sourced line items from a deal.
+   * Called when the deal has an order — only OrderProdMix + QSeatEtab should remain.
+   * QuoteProdMix items are identified by having quotedtl_quotenum set and hs_sku NOT set.
+   */
+  async function purgeQuoteProdMixItems(dealId, quoteNum) {
+    try {
+      const allItems = await fetchExistingLineItems(dealId);
+      const quoteProdMixItems = filterQuoteProdMixItems(allItems);
+
+      if (!quoteProdMixItems.length) return { deleted: 0 };
+
+      fastify.log.info(`Purging ${quoteProdMixItems.length} QuoteProdMix line items from deal ${dealId} (quote ${quoteNum})`);
+      let deleted = 0;
+      for (const item of quoteProdMixItems) {
+        try {
+          await deleteHubSpotLineItem(item.id);
+          fastify.log.info(`Purged QuoteProdMix line item ${item.id} from deal ${dealId}`);
+          deleted++;
+        } catch (error) {
+          fastify.log.warn(`Failed to purge QuoteProdMix line item ${item.id}: ${error.message}`);
+        }
+      }
+      return { deleted };
+    } catch (error) {
+      fastify.log.warn(`Failed to purge QuoteProdMix items from deal ${dealId}: ${error.message}`);
+      return { deleted: 0 };
+    }
+  }
+
   async function reconcileAndSync(epicorRecords, dealId) {
     const results = { created: 0, deleted: 0, unchanged: 0, errors: 0 };
 
@@ -235,14 +265,15 @@ async function quoteProdMixService(fastify, _) {
             continue;
           }
 
-          // Deal source check: if deal has an order number, order takes precedence — skip
+          // Deal source check: if deal has an order number, order takes precedence — purge any existing QuoteProdMix items
           const dealProps = deal.properties || {};
           const hasOrder = dealProps.orderhed_ordernum
             && String(dealProps.orderhed_ordernum).trim() !== '';
           if (hasOrder) {
             fastify.log.info(
-              `QuoteProdMix trigger: Deal ${deal.id} for quote ${quoteNum} has order ${dealProps.orderhed_ordernum} — order takes precedence, skipping`
+              `QuoteProdMix trigger: Deal ${deal.id} for quote ${quoteNum} has order ${dealProps.orderhed_ordernum} — order takes precedence, purging QuoteProdMix items`
             );
+            await purgeQuoteProdMixItems(deal.id, quoteNum);
             results.skipped++;
             continue;
           }
@@ -270,6 +301,7 @@ async function quoteProdMixService(fastify, _) {
   if (!fastify.hasDecorator('quoteProdMixService')) {
     fastify.decorate('quoteProdMixService', {
       syncLineItemsForQuote,
+      purgeQuoteProdMixItems,
       task,
     });
   }

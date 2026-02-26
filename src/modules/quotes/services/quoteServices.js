@@ -222,15 +222,20 @@ async function quoteService(fastify, _) {
 
   /**
    * Syncs line items for a quote deal.
-   * - QuoteProdMix is only synced when the deal does NOT have an order
-   *   (order takes precedence for ProdMix).
+   * - When the deal has an order, QuoteProdMix is NOT synced and any existing
+   *   QuoteProdMix line items are purged (order takes precedence).
    * - QSeatEtab is ALWAYS synced regardless of order presence.
    */
   async function syncQuoteLineItems(quoteNum, dealId) {
     const hasOrder = await dealHasOrder(dealId);
 
     if (hasOrder) {
-      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} has an order — skipping QuoteProdMix (order takes precedence)`);
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} has an order — purging any QuoteProdMix line items (order takes precedence)`);
+      try {
+        await fastify.quoteProdMixService.purgeQuoteProdMixItems(dealId, quoteNum);
+      } catch (purgeError) {
+        fastify.log.warn(`Failed to purge QuoteProdMix line items for quote ${quoteNum}: ${purgeError.message}`);
+      }
     } else {
       try {
         await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);

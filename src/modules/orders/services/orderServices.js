@@ -191,6 +191,13 @@ async function orderService(fastify, _) {
         fastify.log.warn(`Failed to sync QSeatEtab line items for quote ${quoteNum} on order deal: ${qSeatError.message}`);
       }
 
+      // Purge any remaining QuoteProdMix items — order takes full precedence
+      try {
+        await fastify.quoteProdMixService.purgeQuoteProdMixItems(quoteDealId, quoteNum);
+      } catch (purgeError) {
+        fastify.log.warn(`Failed to purge QuoteProdMix items on quote deal ${quoteDealId}: ${purgeError.message}`);
+      }
+
       // Final cross-source dedup pass
       await deduplicateDealLineItems(quoteDealId, `order ${orderNum} (quote deal ${quoteNum})`);
     } catch (quoteUpdateError) {
@@ -366,6 +373,13 @@ async function orderService(fastify, _) {
               } catch (qSeatError) {
                 fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
               }
+
+              // Purge any remaining QuoteProdMix items — order takes full precedence
+              try {
+                await fastify.quoteProdMixService.purgeQuoteProdMixItems(newDealId, quoteNum);
+              } catch (purgeError) {
+                fastify.log.warn(`Failed to purge QuoteProdMix items for order ${orderNum}: ${purgeError.message}`);
+              }
             }
 
             // Final cross-source dedup pass
@@ -408,6 +422,13 @@ async function orderService(fastify, _) {
             } catch (qSeatError) {
               fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
             }
+
+            // Purge any remaining QuoteProdMix items — order takes full precedence
+            try {
+              await fastify.quoteProdMixService.purgeQuoteProdMixItems(dealId, quoteNum);
+            } catch (purgeError) {
+              fastify.log.warn(`Failed to purge QuoteProdMix items for order ${orderNum}: ${purgeError.message}`);
+            }
           }
 
           // Final cross-source dedup pass
@@ -447,6 +468,13 @@ async function orderService(fastify, _) {
               await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
             } catch (qSeatError) {
               fastify.log.warn(`Failed to sync QSeatEtab line items for order ${orderNum} (quote ${quoteNum}): ${qSeatError.message}`);
+            }
+
+            // Purge any remaining QuoteProdMix items — order takes full precedence
+            try {
+              await fastify.quoteProdMixService.purgeQuoteProdMixItems(dealId, quoteNum);
+            } catch (purgeError) {
+              fastify.log.warn(`Failed to purge QuoteProdMix items for order ${orderNum}: ${purgeError.message}`);
             }
           }
 
@@ -539,6 +567,7 @@ export default fp(orderService, {
   dependencies: [
     'orderRepository',
     'orderProdMixService',
+    'quoteProdMixService',
     'qSeatEtabService',
     'epicorAdapter',
     'hubspotAdapter',
