@@ -8,10 +8,10 @@ const toSingleLineText = (value) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'OrderDtl_OrderNum', hubspot: 'orderdtl_ordernum', transform: Number },
-  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toSingleLineText },
-  { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
-  { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },
+  { epicor: 'OrderDtl_OrderNum', hubspot: 'orderdtl_ordernum', transform: Number },//Sales Order Num
+  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toSingleLineText },//Product Group
+  { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },//Unit Price
+  { epicor: 'RowIdent', hubspot: 'rowident', transform: (v) => v ? String(v).trim() : null },//Row Ident
 ];
 
 /** Properties fetched from HubSpot for source filtering and comparison. */
@@ -283,13 +283,9 @@ async function orderProdMixService(fastify, _) {
           const dealId = deal.id;
           const uniqueRecords = deduplicateEpicorRecords(orderRecords);
 
-          // Check if deal has both order and quote (order takes precedence → clearAll)
-          const dealProps = deal.properties || {};
-          const hasQuote = dealProps.quotehed_quotenum_
-            && String(dealProps.quotehed_quotenum_).trim() !== '';
-          const clearAll = hasQuote;
-
-          await reconcileAndSync(uniqueRecords, dealId, { clearAll });
+          // Independent trigger: only reconcile OrderProdMix-sourced items.
+          // QSeatEtab items are untouched (they have their own source filter).
+          await reconcileAndSync(uniqueRecords, dealId);
           fastify.log.info(`OrderProdMix trigger: Reconciled ${uniqueRecords.length} items for order ${orderNum} (deal ${dealId})`);
           results.synced++;
         } catch (error) {

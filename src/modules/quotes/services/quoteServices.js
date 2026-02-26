@@ -8,33 +8,33 @@ const toMidnightUTC = (v) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum_', transform: String },
-  { epicor: 'QuoteHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },
-  { epicor: 'Customer_Name', hubspot: 'customer_name' },
-  { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },
-  { epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },
-  { epicor: 'QuoteHed_CurrentStage', hubspot: 'quotehed_currentstage' },
-  { epicor: 'QuoteHed_Character08', hubspot: 'orderhed_characternh' },
-  { epicor: 'QuoteHed_ShortChar09', hubspot: 'orderhed_shortcharni' },
-  { epicor: 'QuoteHed_Character10', hubspot: 'quotehed_character10' },
-  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: (v) => v ? String(v).trim() : null },
-  { epicor: 'QuoteHed_ShortChar01', hubspot: 'quotehed_shortchar01' },
-  { epicor: 'QuoteHed_ShortChar02', hubspot: 'quotehed_shortchar02' },
-  { epicor: 'QuoteHed_ShortChar03', hubspot: 'orderhed_shortchar03' },
-  { epicor: 'QuoteHed_ShortChar04', hubspot: 'quotehed_shortchar04' },
-  { epicor: 'QuoteHed_UserChar3', hubspot: 'orderhed_userchar3' },
-  { epicor: 'QuoteHed_Character01', hubspot: 'orderhed_character01' },
-  { epicor: 'QuoteHed_ShortChar05', hubspot: 'orderhed_shortchar05' },
-  { epicor: 'QuoteHed_ShortChar06', hubspot: 'orderhed_shortchar06' },
-  { epicor: 'QuoteHed_ShortChar07', hubspot: 'orderhed_shortchar07' },
-  { epicor: 'QuoteHed_Character04', hubspot: 'quotehed_character04' },
-  { epicor: 'QuoteHed_Character05', hubspot: 'quotehed_character05' },
-  { epicor: 'QuoteHed_Character06', hubspot: 'quotehed_character06' },
-  { epicor: 'QuoteHed_Character02', hubspot: 'quotehed_character02' },
-  { epicor: 'QuoteHed_Character03', hubspot: 'quotehed_character03' },
-  { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },
-  { epicor: 'Task_TaskComment', hubspot: 'task_taskcomment' },
-  { epicor: 'QuoteHed_SysRowID', hubspot: 'rowident' },
+  { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum_', transform: String },//Quote Num - orderdtl_quotenum - quotehed_quotenum_
+  { epicor: 'QuoteHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },//Customer Number - orderhed_custnum - customer_custnum
+  { epicor: 'Customer_Name', hubspot: 'customer_name' },//Customer Name/Quote To - customer_name
+  { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },//Conclusion - task_conclusion
+  { epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },//Entrey Date - quotehed_entrydate
+  { epicor: 'QuoteHed_CurrentStage', hubspot: 'quotehed_currentstage' },//Current Stage - quotehed_currentstage
+  { epicor: 'QuoteHed_Character08', hubspot: 'orderhed_characternh' },//Job Name/Order Job Name - orderhed_characternh
+  { epicor: 'QuoteHed_ShortChar09', hubspot: 'orderhed_shortcharni' },//Lead Time/Order Lead Time - orderhed_shortcharni
+  { epicor: 'QuoteHed_Character10', hubspot: 'quotehed_character10' },//Quote CSR/CSR - quotehed_character10
+  { epicor: 'SalesRep_Name', hubspot: 'salesrep_name', transform: (v) => v ? String(v).trim() : null },//TM - salesrep_name
+  { epicor: 'QuoteHed_ShortChar01', hubspot: 'quotehed_shortchar01' },//Class - quotehed_shortchar01
+  { epicor: 'QuoteHed_ShortChar02', hubspot: 'quotehed_shortchar02' },//Paint - quotehed_shortchar02
+  { epicor: 'QuoteHed_ShortChar03', hubspot: 'orderhed_shortchar03' },//Base Color - orderhed_shortchar03
+  { epicor: 'QuoteHed_ShortChar04', hubspot: 'quotehed_shortchar04' },//Shelf Paint - quotehed_shortchar04
+  { epicor: 'QuoteHed_UserChar3', hubspot: 'orderhed_userchar3' },//Base Style - orderhed_userchar3
+  { epicor: 'QuoteHed_Character01', hubspot: 'orderhed_character01' },//TCap Style - orderhed_character01
+  { epicor: 'QuoteHed_ShortChar05', hubspot: 'orderhed_shortchar05' },//Shelf Style - orderhed_shortchar05
+  { epicor: 'QuoteHed_ShortChar06', hubspot: 'orderhed_shortchar06' },//Elec Style - orderhed_shortchar06
+  { epicor: 'QuoteHed_ShortChar07', hubspot: 'orderhed_shortchar07' },//Rails Style - orderhed_shortchar07
+  { epicor: 'QuoteHed_Character04', hubspot: 'quotehed_character04' },//Panel Fab - quotehed_character04
+  { epicor: 'QuoteHed_Character05', hubspot: 'quotehed_character05' },//Flipper Fab - quotehed_character05
+  { epicor: 'QuoteHed_Character06', hubspot: 'quotehed_character06' },//Tack Fab - quotehed_character06
+  { epicor: 'QuoteHed_Character02', hubspot: 'quotehed_character02' },//WS Finish - quotehed_character02
+  { epicor: 'QuoteHed_Character03', hubspot: 'quotehed_character03' },//WS Trim - quotehed_character03
+  { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' },//Type - customer_customertype
+  { epicor: 'Task_TaskComment', hubspot: 'task_taskcomment' },//Task Comment - task_taskcomment
+  { epicor: 'QuoteHed_SysRowID', hubspot: 'rowident' },//Row Ident - rowident
 ];
 
 function transformEpicorToHubSpot(epicorQuote) {
@@ -190,21 +190,25 @@ async function quoteService(fastify, _) {
   }
 
   /**
-   * Syncs QuoteProdMix and QSeatEtab line items for a quote deal, but only
-   * if the deal does not already have an order number (order takes precedence).
+   * Syncs line items for a quote deal.
+   * - QuoteProdMix is only synced when the deal does NOT have an order
+   *   (order takes precedence for ProdMix).
+   * - QSeatEtab is ALWAYS synced regardless of order presence.
    */
   async function syncQuoteLineItems(quoteNum, dealId) {
-    if (await dealHasOrder(dealId)) {
-      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} has an order number — order takes precedence, skipping quote line item sync`);
-      return;
+    const hasOrder = await dealHasOrder(dealId);
+
+    if (hasOrder) {
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} has an order — skipping QuoteProdMix (order takes precedence)`);
+    } else {
+      try {
+        await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
+      } catch (lineItemError) {
+        fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
+      }
     }
 
-    try {
-      await fastify.quoteProdMixService.syncLineItemsForQuote(quoteNum, dealId);
-    } catch (lineItemError) {
-      fastify.log.warn(`Failed to sync QuoteProdMix line items for quote ${quoteNum}: ${lineItemError.message}`);
-    }
-
+    // QSeatEtab is always processed for quotes
     try {
       await fastify.qSeatEtabService.syncLineItemsForQuote(quoteNum, dealId);
     } catch (lineItemError) {

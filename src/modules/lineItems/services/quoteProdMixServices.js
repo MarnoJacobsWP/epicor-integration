@@ -8,9 +8,9 @@ const toSingleLineText = (value) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },
-  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toSingleLineText },
-  { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },
+  { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },//Quote Num
+  { epicor: 'ProdGrup_Character01', hubspot: 'prodgrup_character01', transform: toSingleLineText },//Product Group
+  { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },//Unit Price
 ];
 
 /** Properties fetched from HubSpot for source filtering and comparison. */

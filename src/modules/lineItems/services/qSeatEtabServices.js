@@ -1,12 +1,12 @@
 import fp from 'fastify-plugin';
 
 const FIELD_MAPPINGS = [
-  { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },
-  { epicor: 'ProdGrup_Description', hubspot: 'prodgrup_description' },
-  { epicor: 'QuoteDtl_PartNum', hubspot: 'quotedtl_partnum' },
-  { epicor: 'QuoteDtl_LineDesc', hubspot: 'quotedtl_linedesc' },
-  { epicor: 'QuoteDtl_OrderQty', hubspot: 'quantity', transform: Number },
-  { epicor: 'RowIdent', hubspot: 'rowident' },
+  { epicor: 'QuoteDtl_QuoteNum', hubspot: 'quotedtl_quotenum', transform: Number },//Quote Num
+  { epicor: 'ProdGrup_Description', hubspot: 'prodgrup_description' },//Prod Group
+  { epicor: 'QuoteDtl_PartNum', hubspot: 'quotedtl_partnum' },//Part
+  { epicor: 'QuoteDtl_LineDesc', hubspot: 'quotedtl_linedesc' },//Product Description
+  { epicor: 'QuoteDtl_OrderQty', hubspot: 'quantity', transform: Number },//Quantity
+  { epicor: 'RowIdent', hubspot: 'rowident' },//Row Ident
 ];
 
 /**
