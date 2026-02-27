@@ -3,7 +3,7 @@ import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
 
 const FIELD_MAPPINGS = [
   { epicor: 'Customer_CustNum', hubspot: 'customer_custnum', transform: padCustNum }, //Customer Cust Num - customer_custnum
-  { epicor: 'Customer_CustID', hubspot: 'customer_custid_', transform: padCustNum }, //Customer ID - customer_id - customer_custid_
+  { epicor: 'Customer_CustID', hubspot: 'customer_id', transform: padCustNum }, //Customer ID - customer_id - customer_custid_
   { epicor: 'Customer_Name', hubspot: 'name', transform: (v) => v ? String(v).trim().substring(0, 200) : null }, //Company Name - name
   { epicor: 'Customer_Address1', hubspot: 'address', transform: (v) => v ? String(v).trim().substring(0, 255) : null }, //Street Address - address
   { epicor: 'Customer_Address2', hubspot: 'address2', transform: (v) => v ? String(v).trim().substring(0, 255) : null }, //Street Address 2 - address2

@@ -17,12 +17,12 @@ export const constants = {
     LINE_ITEMS: 'line_items',
   },
   HUBSPOT_PIPELINES: {
-    QUOTES: 'default',
+    QUOTES: '1491808998',
   },
   HUBSPOT_DEAL_STAGES: {
-    QUOTE_CREATED: '2817003207',
-    CLOSED_WON: 'closedwon',
-    CLOSED_LOST: 'closedlost',
+    QUOTE_CREATED: '2404843206',
+    CLOSED_WON: '2404843211',
+    CLOSED_LOST: '2404843212',
   },
   HUBSPOT_ASSOCIATIONS: {
     COMPANY_TO_CONTACT: 2,

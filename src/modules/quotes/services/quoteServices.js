@@ -9,8 +9,8 @@ const toMidnightUTC = (v) => {
 };
 
 const FIELD_MAPPINGS = [
-  { epicor: 'QuoteHed_QuoteNum', hubspot: 'quotehed_quotenum_', transform: String },//Quote Num - orderdtl_quotenum - quotehed_quotenum_
-  { epicor: 'QuoteHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum },//Customer Number - orderhed_custnum - customer_custnum
+  { epicor: 'QuoteHed_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String },//Quote Num - orderdtl_quotenum - quotehed_quotenum_
+  { epicor: 'QuoteHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum },//Customer Number - orderhed_custnum - customer_custnum
   { epicor: 'Customer_Name', hubspot: 'customer_name' },//Customer Name/Quote To - customer_name
   { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },//Conclusion - task_conclusion
   { epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },//Entrey Date - quotehed_entrydate
@@ -279,7 +279,7 @@ async function quoteService(fastify, _) {
 
         try {
           const searchData = await fastify.backoff(() =>
-            fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+            fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
           );
           existRecord = searchData.results?.[0] || null;
           fastify.log.info(`Search completed for quote ${quoteNum}: ${existRecord ? 'Found existing deal ' + existRecord.id : 'No existing deal found'}`);

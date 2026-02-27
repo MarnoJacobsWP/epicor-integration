@@ -10,28 +10,28 @@ const toMidnightUTC = (v) => {
 
 const FIELD_MAPPINGS = [
   { epicor: 'OrderHed_OrderNum', hubspot: 'orderhed_ordernum', transform: String },  //Sales Order Num - orderhed_ordernum
-  { epicor: 'OrderHed_CustNum', hubspot: 'customer_custnum', transform: padCustNum }, //Customer Number - orderhed_custnum - customer_custnum
-  { epicor: 'OrderDtl_QuoteNum', hubspot: 'quotehed_quotenum_', transform: String }, //Quote Num - orderdtl_quotenum - quotehed_quotenum_
+  { epicor: 'OrderHed_CustNum', hubspot: 'orderhed_custnum', transform: padCustNum }, //Customer Number - orderhed_custnum - customer_custnum
+  { epicor: 'OrderDtl_QuoteNum', hubspot: 'orderdtl_quotenum', transform: String }, //Quote Num - orderdtl_quotenum - quotehed_quotenum_
   { epicor: 'OrderHed_OrderDate', hubspot: 'orderhed_orderdate', transform: toMidnightUTC }, //Order Date - orderhed_orderdate
   { epicor: 'OrderHed_CheckBox10', hubspot: 'orderhed_checkboxan', transform: Boolean }, //CSR/Order CSR - orderhed_checkboxan
   { epicor: 'Customer_Name', hubspot: 'customer_name' }, //Customer Name/Quote To - customer_name
   { epicor: 'OrderHed_Character08', hubspot: 'orderhed_characternh' }, //Job Name/Order Job Name - orderhed_characternh
   { epicor: 'OrderHed_ShortChar09', hubspot: 'orderhed_shortcharni' }, //Lead Time/Order Lead Time - orderhed_shortcharni
   { epicor: 'SalesRep_Name', hubspot: 'salesrep_name' }, //TM - salesrep_name
-  { epicor: 'OrderHed_ShortChar01', hubspot: 'orderhed_shortchar01' }, //Class/Order Class - quotehed_shortchar01 - orderhed_shortchar01
-  { epicor: 'OrderHed_ShortChar02', hubspot: 'orderhed_shortchar02' }, //Paint/Order Paint - quotehed_shortchar02 - orderhed_shortchar02
+  { epicor: 'OrderHed_ShortChar01', hubspot: 'quotehed_shortchar01' }, //Class/Order Class - quotehed_shortchar01 - orderhed_shortchar01
+  { epicor: 'OrderHed_ShortChar02', hubspot: 'quotehed_shortchar02' }, //Paint/Order Paint - quotehed_shortchar02 - orderhed_shortchar02
   { epicor: 'OrderHed_ShortChar03', hubspot: 'orderhed_shortchar03' }, //Base Color - orderhed_shortchar03
-  { epicor: 'OrderHed_ShortChar04', hubspot: 'orderhed_shortchar04' }, //Shelf Paint/Order Shelf Paint - quotehed_shortchar04 - orderhed_shortchar04
+  { epicor: 'OrderHed_ShortChar04', hubspot: 'quotehed_shortchar04' }, //Shelf Paint/Order Shelf Paint - quotehed_shortchar04 - orderhed_shortchar04
   { epicor: 'OrderHed_UserChar3', hubspot: 'orderhed_userchar3' }, //Base Style - orderhed_userchar3
   { epicor: 'OrderHed_Character01', hubspot: 'orderhed_character01' }, //TCap Style - orderhed_character01
   { epicor: 'OrderHed_ShortChar05', hubspot: 'orderhed_shortchar05' }, //Shelf Style - orderhed_shortchar05
   { epicor: 'OrderHed_ShortChar06', hubspot: 'orderhed_shortchar06' }, //Elec Style - orderhed_shortchar06
   { epicor: 'OrderHed_ShortChar07', hubspot: 'orderhed_shortchar07' }, //Rails Style - orderhed_shortchar07
-  { epicor: 'OrderHed_Character04', hubspot: 'orderhed_character04' }, //Panel Fab/Order Panel Fab - quotehed_character04 - orderhed_character04
-  { epicor: 'OrderHed_Character05', hubspot: 'orderhed_character05' }, //Flipper Fab/Order Flipper Fab - quotehed_character05 - orderhed_character05
-  { epicor: 'OrderHed_Character06', hubspot: 'orderhed_character06' }, //Tack Fab/Order Tack Fab - quotehed_character06 - orderhed_character06
-  { epicor: 'OrderHed_Character02', hubspot: 'orderhed_character02' }, //WS Finish/Order WS Finish - quotehed_character02 - orderhed_character02
-  { epicor: 'OrderHed_Character03', hubspot: 'orderhed_character03' }, //WS Trim/Order WS Trim - quotehed_character03 - orderhed_character03
+  { epicor: 'OrderHed_Character04', hubspot: 'quotehed_character04' }, //Panel Fab/Order Panel Fab - quotehed_character04 - orderhed_character04
+  { epicor: 'OrderHed_Character05', hubspot: 'quotehed_character05' }, //Flipper Fab/Order Flipper Fab - quotehed_character05 - orderhed_character05
+  { epicor: 'OrderHed_Character06', hubspot: 'quotehed_character06' }, //Tack Fab/Order Tack Fab - quotehed_character06 - orderhed_character06
+  { epicor: 'OrderHed_Character02', hubspot: 'quotehed_character02' }, //WS Finish/Order WS Finish - quotehed_character02 - orderhed_character02
+  { epicor: 'OrderHed_Character03', hubspot: 'quotehed_character03' }, //WS Trim/Order WS Trim - quotehed_character03 - orderhed_character03
   { epicor: 'Customer_CustomerType', hubspot: 'customer_customertype' }, //Type - customer_customertype
   { epicor: 'OrderHed_SysRowID', hubspot: 'rowident' }, //Row Ident - rowident
 ];
@@ -179,7 +179,7 @@ async function orderService(fastify, _) {
 
     try {
       const quoteSearchData = await fastify.backoff(() =>
-        fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+        fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
       );
       if (quoteSearchData.results?.[0]?.id) {
         await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
@@ -291,7 +291,7 @@ async function orderService(fastify, _) {
         if (quoteNum) {
           try {
             const quoteSearch = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('quotehed_quotenum_', [quoteNum])
+              fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
             );
             if (quoteSearch.results?.[0]) {
               const quoteDeal = quoteSearch.results[0];
