@@ -78,7 +78,6 @@ async function orderProdMixService(fastify, _) {
 
   async function deleteHubSpotLineItem(lineItemId) {
     await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(lineItemId));
-    await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(lineItemId) }).catch(() => {});
   }
 
   async function createHubSpotLineItem(properties, dealId) {
@@ -91,22 +90,6 @@ async function orderProdMixService(fastify, _) {
 
     const created = await fastify.backoff(() =>
       fastify.hubspotAdapter.createLineItem({ properties, associations })
-    );
-
-    const epicorId = properties.rowident
-      || `${properties.orderdtl_ordernum}|${properties.prodgrup_character01 || ''}|${properties.price || ''}`;
-
-    await fastify.lineItemRepository.insertDatabase({
-      epicorId: String(epicorId),
-      hubspotId: created.id,
-      source: 'EpicorOrderProdMix',
-      orderNum: properties.orderdtl_ordernum,
-      action: 'create',
-    }).catch(() =>
-      fastify.lineItemRepository.updateDatabase(
-        { epicorId: String(epicorId) },
-        { hubspotId: created.id, source: 'EpicorOrderProdMix', orderNum: properties.orderdtl_ordernum, action: 'create' },
-      ).catch(() => {})
     );
 
     return created;
@@ -210,7 +193,6 @@ async function orderProdMixService(fastify, _) {
 export default fp(orderProdMixService, {
   name: 'orderProdMixService',
   dependencies: [
-    'lineItemRepository',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

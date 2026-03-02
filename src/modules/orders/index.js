@@ -5,13 +5,6 @@ import fp from 'fastify-plugin';
 export default fp(
   async function orders(fastify, opts) {
     await fastify.register(AutoLoad, {
-      dir: join(import.meta.url, 'repositories'),
-      dirNameRoutePrefix: false,
-      indexPattern: /^orderRepository.js$/i,
-      options: { ...opts },
-    });
-
-    await fastify.register(AutoLoad, {
       dir: join(import.meta.url, 'services'),
       dirNameRoutePrefix: false,
       indexPattern: /.*Services(\.js|\.cjs)$/i,

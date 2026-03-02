@@ -28,41 +28,6 @@ async function contactService(fastify, _) {
   const BATCH_SIZE = BATCH_SIZES.CONTACTS || 100;
   const UNIQUE_PROPERTY = 'email';
 
-  async function infoRecord(data) {
-    return await fastify.contactRepository.findByIdProperty(data);
-  }
-
-  async function updateDataBase(filter, data) {
-    return await fastify.contactRepository.updateDatabase(filter, data);
-  }
-
-  async function createDataBase(data) {
-    return await fastify.contactRepository.insertDatabase(data);
-  }
-
-  async function upsertContactRecord({ contact, contactId, email, action }) {
-    const query = {
-      epicorId: contact.RowIdent,
-      source: 'EpicorContacts',
-    };
-
-    const dbData = {
-      hubspotId: contactId,
-      epicorId: contact.RowIdent,
-      source: 'EpicorContacts',
-      email,
-      action,
-      timestamp: new Date()
-    };
-
-    const existRecord = await infoRecord(query);
-    if (existRecord?.hubspotId) {
-      await updateDataBase(query, dbData);
-    } else {
-      await createDataBase(dbData);
-    }
-  }
-
   async function associateContactToCompany(contact, contactId, email) {
     try {
       const custNum = contact.CustCnt_CustNum ? padCustNum(contact.CustCnt_CustNum) : null;
@@ -96,8 +61,7 @@ async function contactService(fastify, _) {
       skipped: 0
     };
 
-    const preparedContacts = [];
-    const emailList = [];
+    const batchData = [];
     
     for (const contact of contacts) {
       try {
@@ -131,13 +95,12 @@ async function contactService(fastify, _) {
           continue;
         }
         
-        preparedContacts.push({
+        batchData.push({
           id: emailStr,
           email: emailStr,
           contact,
           properties: cleanProperties
         });
-        emailList.push(emailStr);
         
       } catch (error) {
         results.errors++;
@@ -148,90 +111,34 @@ async function contactService(fastify, _) {
       }
     }
 
-    if (preparedContacts.length === 0) {
+    if (batchData.length === 0) {
       fastify.log.warn('No valid contact data for batch processing');
       return results;
     }
 
-    let existingByEmail = new Map();
-    let precheckFailed = false;
-    try {
-      const searchData = await fastify.backoff(() =>
-        fastify.hubspotAdapter.searchContactsByProperty('email', emailList)
-      );
-      if (searchData.results?.length) {
-        existingByEmail = new Map(
-          searchData.results
-            .map(result => [String(result.properties?.email || '').trim().toLowerCase(), result.id])
-            .filter(([email]) => email)
-        );
-      }
-    } catch (searchError) {
-      precheckFailed = true;
-      fastify.log.warn(`Contact pre-check failed, falling back to individual processing: ${searchError.message}`);
-    }
-
-    if (precheckFailed) {
-      await processContactsIndividually(contacts, results);
-      return results;
-    }
-
-    const batchData = [];
-    for (const item of preparedContacts) {
-      const existingId = existingByEmail.get(item.email);
-      if (existingId) {
-        results.skipped++;
-        await upsertContactRecord({
-          contact: item.contact,
-          contactId: existingId,
-          email: item.email,
-          action: 'skipped_existing'
-        });
-        await associateContactToCompany(item.contact, existingId, item.email);
-        continue;
-      }
-
-      batchData.push({
-        id: item.id,
-        properties: item.properties
-      });
-    }
-
-    if (batchData.length === 0) {
-      fastify.log.warn('All contacts already exist in HubSpot; no new contacts to create');
-      return results;
-    }
-
-    fastify.log.info(`Prepared ${batchData.length} contacts for batch create (existing contacts skipped)`);
+    fastify.log.info(`Prepared ${batchData.length} contacts for batch upsert`);
 
     try {
       const upsertResult = await fastify.backoff(() =>
-        fastify.hubspotAdapter.batchUpsertContacts(batchData, UNIQUE_PROPERTY)
+        fastify.hubspotAdapter.batchUpsertContacts(
+          batchData.map(item => ({ id: item.id, properties: item.properties })),
+          UNIQUE_PROPERTY
+        )
       );
 
       if (upsertResult.status === 'COMPLETE' && upsertResult.results) {
         for (const result of upsertResult.results) {
           const email = result.properties?.email;
-          const originalContact = contacts.find(c => {
-            const contactEmail = c.CustCnt_EMailAddress;
-            return contactEmail && String(contactEmail).trim().toLowerCase() === email;
-          });
+          const batchItem = batchData.find(b => b.email === email);
           
-          if (originalContact) {
-            if (result.new) {
-              results.created++;
-            } else {
-              results.skipped++;
-            }
+          if (result.new) {
+            results.created++;
+          } else {
+            results.updated++;
+          }
 
-            await upsertContactRecord({
-              contact: originalContact,
-              contactId: result.id,
-              email,
-              action: result.new ? 'create' : 'skipped_existing'
-            });
-
-            await associateContactToCompany(originalContact, result.id, email);
+          if (batchItem) {
+            await associateContactToCompany(batchItem.contact, result.id, email);
           }
         }
       }
@@ -279,22 +186,18 @@ async function contactService(fastify, _) {
           continue;
         }
 
-        const query = {
-          epicorId: contact.RowIdent,
-          source: 'EpicorContacts',
-        };
+        const emailStr = String(email).trim().toLowerCase();
 
-        let existRecord = await infoRecord(query);
-
-        if (!existRecord) {
-          try {
-            const searchData = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchContactsByProperty('email', [email])
-            );
-            existRecord = searchData.results?.[0] || null;
-          } catch (searchError) {
-            existRecord = null;
-          }
+        // Search HubSpot directly to find existing contact
+        let existingContact = null;
+        try {
+          const searchData = await fastify.backoff(() =>
+            fastify.hubspotAdapter.searchContactsByProperty('email', [emailStr])
+          );
+          existingContact = searchData.results?.[0] || null;
+        } catch (searchError) {
+          fastify.log.warn(`Contact ${emailStr} search failed: ${searchError.message}`);
+          existingContact = null;
         }
 
         const props = transformEpicorToHubSpot(contact);
@@ -306,34 +209,22 @@ async function contactService(fastify, _) {
           }
         }
 
-        if (existRecord?.id || existRecord?.hubspotId) {
-          const contactId = existRecord?.hubspotId || existRecord?.id;
+        if (existingContact?.id) {
+          const contactId = existingContact.id;
 
-          await upsertContactRecord({
-            contact,
-            contactId,
-            email,
-            action: 'skipped_existing'
-          });
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateContact({ contactId, properties: cleanProps })
+          );
 
-          await associateContactToCompany(contact, contactId, email);
-
-          results.skipped++;
+          await associateContactToCompany(contact, contactId, emailStr);
+          results.updated++;
         } else {
           const created = await fastify.backoff(() =>
             fastify.hubspotAdapter.createContact({ properties: cleanProps })
           );
           const contactId = created.id;
 
-          await upsertContactRecord({
-            contact,
-            contactId,
-            email,
-            action: 'create'
-          });
-
-          await associateContactToCompany(contact, contactId, email);
-
+          await associateContactToCompany(contact, contactId, emailStr);
           results.created++;
         }
 
@@ -427,7 +318,6 @@ async function contactService(fastify, _) {
 export default fp(contactService, {
   name: 'contactServices',
   dependencies: [
-    'contactRepository',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

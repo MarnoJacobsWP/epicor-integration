@@ -78,38 +78,8 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
-function isDuplicateKeyError(error) {
-  return error?.code === 11000 || String(error?.message || '').includes('E11000 duplicate key error');
-}
-
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
-
-  async function updateDataBase(filter, data) {
-    return await fastify.orderRepository.updateDatabase(filter, data);
-  }
-
-  async function createDataBase(data) {
-    return await fastify.orderRepository.insertDatabase(data);
-  }
-
-  async function createOrUpdateDataBase(data) {
-    try {
-      return await createDataBase(data);
-    } catch (error) {
-      if (!isDuplicateKeyError(error)) throw error;
-
-      await updateDataBase(
-        { epicorId: data.epicorId, source: data.source },
-        data,
-      );
-      return { upserted: true };
-    }
-  }
-
-  async function deleteDataBase(filter) {
-    return await fastify.orderRepository.deleteDatabase(filter);
-  }
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
@@ -208,7 +178,6 @@ async function orderService(fastify, _) {
       for (const dup of duplicates) {
         try {
           await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(dup.id));
-          await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(dup.id) }).catch(() => {});
         } catch (error) {
           fastify.log.error(`Failed to delete duplicate line item ${dup.id}: ${error.message}`);
         }
@@ -271,13 +240,9 @@ async function orderService(fastify, _) {
       let usedQuoteDeal = false;
 
       try {
-        const query = {
-          epicorId: order.OrderHed_SysRowID,
-          source: 'EpicorOrders',
-        };
-
         let existRecord = null;
 
+        // Search HubSpot directly by order number
         try {
           const searchData = await fastify.backoff(() =>
             fastify.hubspotAdapter.searchDealsByProperty('orderhed_ordernum', [orderNum])
@@ -288,6 +253,7 @@ async function orderService(fastify, _) {
           existRecord = null;
         }
 
+        // Also search by quote number if available
         if (quoteNum) {
           try {
             const quoteSearch = await fastify.backoff(() =>
@@ -295,7 +261,7 @@ async function orderService(fastify, _) {
             );
             if (quoteSearch.results?.[0]) {
               const quoteDeal = quoteSearch.results[0];
-              const existingDealId = existRecord?.hubspotId || existRecord?.id;
+              const existingDealId = existRecord?.id;
               if (!existingDealId || String(existingDealId) !== String(quoteDeal.id)) {
                 existRecord = quoteDeal;
                 usedQuoteDeal = true;
@@ -307,6 +273,7 @@ async function orderService(fastify, _) {
           }
         }
 
+        // Fallback: search by deal name
         if (!existRecord) {
           const dealName = generateDealName(order);
           try {
@@ -336,8 +303,8 @@ async function orderService(fastify, _) {
           }
         });
 
-        if (existRecord?.id || existRecord?.hubspotId) {
-          const dealId = existRecord?.hubspotId || existRecord?.id;
+        if (existRecord?.id) {
+          const dealId = existRecord.id;
           let needsCreate = false;
 
           try {
@@ -352,8 +319,7 @@ async function orderService(fastify, _) {
               || combined.toLowerCase().includes('resource not found')
               || /\b404\b/.test(combined);
             if (notFound) {
-              await deleteDataBase(query);
-              fastify.log.warn(`Order ${orderNum} deleted from DB because HubSpot deal ${dealId} was not found`);
+              fastify.log.warn(`Order ${orderNum}: HubSpot deal ${dealId} was not found, will create new`);
               needsCreate = true;
             } else {
               throw error;
@@ -368,17 +334,7 @@ async function orderService(fastify, _) {
 
             fastify.log.info(`Order ${orderNum} recreated in HubSpot ${newDealId}`);
 
-            await createOrUpdateDataBase({
-              hubspotId: newDealId,
-              epicorId: order.OrderHed_SysRowID,
-              source: 'EpicorOrders',
-              orderNum: orderNum,
-              action: 'create',
-              timestamp: new Date()
-            });
-
             await syncOrderLineItems(orderNum, quoteNum, newDealId);
-
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
             await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
@@ -386,24 +342,9 @@ async function orderService(fastify, _) {
             continue;
           }
 
-          const action = 'updated';
-          fastify.log.info(`Order ${orderNum} ${action} in HubSpot ${dealId}`);
-
-          if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action, timestamp: new Date() });
-          } else {
-            await createOrUpdateDataBase({
-              hubspotId: dealId,
-              epicorId: order.OrderHed_SysRowID,
-              source: 'EpicorOrders',
-              orderNum: orderNum,
-              action: 'create',
-              timestamp: new Date()
-            });
-          }
+          fastify.log.info(`Order ${orderNum} updated in HubSpot ${dealId}`);
 
           await syncOrderLineItems(orderNum, quoteNum, dealId);
-
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
@@ -416,17 +357,7 @@ async function orderService(fastify, _) {
 
           fastify.log.info(`Order ${orderNum} created in HubSpot ${dealId}`);
 
-          await createOrUpdateDataBase({
-            hubspotId: dealId,
-            epicorId: order.OrderHed_SysRowID,
-            source: 'EpicorOrders',
-            orderNum: orderNum,
-            action: 'create',
-            timestamp: new Date()
-          });
-
           await syncOrderLineItems(orderNum, quoteNum, dealId);
-
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
 
@@ -511,7 +442,6 @@ async function orderService(fastify, _) {
 export default fp(orderService, {
   name: 'orderServices',
   dependencies: [
-    'orderRepository',
     'orderProdMixService',
     'quoteProdMixService',
     'qSeatEtabService',

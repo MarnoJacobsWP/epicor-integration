@@ -128,7 +128,6 @@ async function qSeatEtabService(fastify, _) {
 
   async function deleteHubSpotLineItem(lineItemId) {
     await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(lineItemId));
-    await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(lineItemId) }).catch(() => {});
   }
 
   async function createHubSpotLineItem(properties, dealId) {
@@ -141,22 +140,6 @@ async function qSeatEtabService(fastify, _) {
 
     const created = await fastify.backoff(() =>
       fastify.hubspotAdapter.createLineItem({ properties, associations })
-    );
-
-    const epicorId = properties.rowident
-      || `${properties.quotedtl_quotenum}|${properties.hs_sku || ''}|${properties.name || ''}`;
-
-    await fastify.lineItemRepository.insertDatabase({
-      epicorId: String(epicorId),
-      hubspotId: created.id,
-      source: 'EpicorQSeatEtab',
-      quoteNum: properties.quotedtl_quotenum,
-      action: 'create',
-    }).catch(() =>
-      fastify.lineItemRepository.updateDatabase(
-        { epicorId: String(epicorId) },
-        { hubspotId: created.id, source: 'EpicorQSeatEtab', quoteNum: properties.quotedtl_quotenum, action: 'create' },
-      ).catch(() => {})
     );
 
     return created;
@@ -305,7 +288,6 @@ async function qSeatEtabService(fastify, _) {
 export default fp(qSeatEtabService, {
   name: 'qSeatEtabService',
   dependencies: [
-    'lineItemRepository',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

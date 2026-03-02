@@ -80,10 +80,6 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
-function isDuplicateKeyError(error) {
-  return error?.code === 11000 || String(error?.message || '').includes('E11000 duplicate key error');
-}
-
 async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const UNKNOWN_OPTION = 'Unknown Option';
@@ -106,32 +102,6 @@ async function quoteService(fastify, _) {
     const clean = String(value || '').trim();
     if (!clean) return UNKNOWN_OPTION;
     return optionsSet.has(clean) ? clean : UNKNOWN_OPTION;
-  }
-
-  async function updateDataBase(filter, data) {
-    return await fastify.quoteRepository.updateDatabase(filter, data);
-  }
-
-  async function createDataBase(data) {
-    return await fastify.quoteRepository.insertDatabase(data);
-  }
-
-  async function createOrUpdateDataBase(data) {
-    try {
-      return await createDataBase(data);
-    } catch (error) {
-      if (!isDuplicateKeyError(error)) throw error;
-
-      await updateDataBase(
-        { epicorId: data.epicorId, source: data.source },
-        data,
-      );
-      return { upserted: true };
-    }
-  }
-
-  async function deleteDataBase(filter) {
-    return await fastify.quoteRepository.deleteDatabase(filter);
   }
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
@@ -208,7 +178,6 @@ async function quoteService(fastify, _) {
       for (const dup of duplicates) {
         try {
           await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(dup.id));
-          await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(dup.id) }).catch(() => {});
         } catch (error) {
           fastify.log.error(`Failed to delete duplicate line item ${dup.id}: ${error.message}`);
         }
@@ -270,11 +239,7 @@ async function quoteService(fastify, _) {
       let props = {};
 
       try {
-        const query = {
-          epicorId: quote.QuoteHed_SysRowID,
-          source: 'EpicorQuotes',
-        };
-
+        // Search HubSpot directly by quote number
         let existRecord = null;
 
         try {
@@ -288,6 +253,7 @@ async function quoteService(fastify, _) {
           existRecord = null;
         }
 
+        // Fallback: search by deal name
         if (!existRecord) {
           const dealName = generateDealName(quote);
           try {
@@ -325,8 +291,8 @@ async function quoteService(fastify, _) {
           }
         });
 
-        if (existRecord?.id || existRecord?.hubspotId) {
-          const dealId = existRecord?.hubspotId || existRecord?.id;
+        if (existRecord?.id) {
+          const dealId = existRecord.id;
           let needsCreate = false;
 
           try {
@@ -346,8 +312,7 @@ async function quoteService(fastify, _) {
               || combined.toLowerCase().includes('resource not found')
               || /\b404\b/.test(combined);
             if (notFound) {
-              await deleteDataBase(query);
-              fastify.log.warn(`Quote ${quoteNum} deleted from DB because HubSpot deal ${dealId} was not found`);
+              fastify.log.warn(`Quote ${quoteNum}: HubSpot deal ${dealId} was not found, will create new`);
               needsCreate = true;
             } else {
               throw error;
@@ -366,17 +331,7 @@ async function quoteService(fastify, _) {
 
             fastify.log.info(`Quote ${quoteNum} recreated in HubSpot ${newDealId}`);
 
-            await createOrUpdateDataBase({
-              hubspotId: newDealId,
-              epicorId: quote.QuoteHed_SysRowID,
-              source: 'EpicorQuotes',
-              quoteNum: quoteNum,
-              action: 'create',
-              timestamp: new Date()
-            });
-
             await syncQuoteLineItems(quoteNum, newDealId, { skipOrderCheck: true });
-
             await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, newDealId);
 
             results.created++;
@@ -391,21 +346,7 @@ async function quoteService(fastify, _) {
           }
           fastify.log.info(`Quote ${quoteNum} ${action} in HubSpot ${dealId}`);
 
-          if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action, timestamp: new Date() });
-          } else {
-            await createOrUpdateDataBase({
-              hubspotId: dealId,
-              epicorId: quote.QuoteHed_SysRowID,
-              source: 'EpicorQuotes',
-              quoteNum: quoteNum,
-              action: 'create',
-              timestamp: new Date()
-            });
-          }
-
           await syncQuoteLineItems(quoteNum, dealId);
-
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
 
           results.updated++;
@@ -417,17 +358,7 @@ async function quoteService(fastify, _) {
 
           fastify.log.info(`Quote ${quoteNum} created in HubSpot ${dealId}`);
 
-          await createOrUpdateDataBase({
-            hubspotId: dealId,
-            epicorId: quote.QuoteHed_SysRowID,
-            source: 'EpicorQuotes',
-            quoteNum: quoteNum,
-            action: 'create',
-            timestamp: new Date()
-          });
-
           await syncQuoteLineItems(quoteNum, dealId, { skipOrderCheck: true });
-
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
 
           results.created++;
@@ -511,7 +442,6 @@ async function quoteService(fastify, _) {
 export default fp(quoteService, {
   name: 'quoteServices',
   dependencies: [
-    'quoteRepository',
     'quoteProdMixService',
     'qSeatEtabService',
     'epicorAdapter',

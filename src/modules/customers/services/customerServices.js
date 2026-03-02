@@ -66,20 +66,27 @@ async function customerService(fastify, _) {
     return optionsSet.has(clean) ? clean : UNKNOWN_OPTION;
   }
 
-  async function infoRecord(data) {
-    return await fastify.customerRepository.findByIdProperty(data);
-  }
-
-  async function updateDataBase(filter, data) {
-    return await fastify.customerRepository.updateDatabase(filter, data);
-  }
-
-  async function createDataBase(data) {
-    return await fastify.customerRepository.insertDatabase(data);
-  }
-
-  async function deleteDataBase(filter) {
-    return await fastify.customerRepository.deleteDatabase(filter);
+  async function associateContactsToCompany(companyId, custNum) {
+    try {
+      if (!custNum) return;
+      const contactSearch = await fastify.backoff(() =>
+        fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
+      );
+      if (contactSearch.results?.length > 0) {
+        for (const contact of contactSearch.results) {
+          await fastify.hubspotAdapter.ensureAssociation(
+            'companies',
+            companyId,
+            'contacts',
+            contact.id,
+            HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
+          );
+        }
+        fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
+      }
+    } catch (associationError) {
+      fastify.log.warn(`Failed to associate contacts for company ${companyId}: ${associationError.message}`);
+    }
   }
 
   async function processCustomerBatch(customers) {
@@ -152,7 +159,8 @@ async function customerService(fastify, _) {
         
         batchData.push({
           id: custIdStr,
-          properties: cleanProperties
+          properties: cleanProperties,
+          _original: customer
         });
         
       } catch (error) {
@@ -192,56 +200,12 @@ async function customerService(fastify, _) {
           
           const customerCustId = result.properties?.[UNIQUE_PROPERTY];
           if (customerCustId) {
-            const originalCustomer = customers.find(c => {
-              const custId = c.Customer_CustID || c.Customer_CustNum;
-              return custId && String(custId).trim() === customerCustId;
-            });
+            const batchItem = batchData.find(b => String(b.id).trim() === customerCustId);
+            const originalCustomer = batchItem?._original;
             
             if (originalCustomer) {
-              const query = {
-                epicorId: originalCustomer.RowIdent,
-                source: 'EpicorCustomers',
-              };
-
-              const dbData = {
-                hubspotId: result.id,
-                epicorId: originalCustomer.RowIdent,
-                source: 'EpicorCustomers',
-                customerId: customerCustId,
-                action: result.new ? 'create' : 'update',
-                timestamp: new Date()
-              };
-
-              let existRecord = await infoRecord(query);
-              
-              if (existRecord?.hubspotId) {
-                await updateDataBase(query, dbData);
-              } else {
-                await createDataBase(dbData);
-              }
-
-              try {
-                const custNum = originalCustomer.Customer_CustNum ? padCustNum(originalCustomer.Customer_CustNum) : null;
-                if (custNum) {
-                  const contactSearch = await fastify.backoff(() =>
-                    fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
-                  );
-                  if (contactSearch.results?.length > 0) {
-                    for (const contact of contactSearch.results) {
-                      await fastify.hubspotAdapter.ensureAssociation(
-                        'companies',
-                        result.id,
-                        'contacts',
-                        contact.id,
-                        HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
-                      );
-                    }
-                    fastify.log.info(`Associated company ${result.id} with ${contactSearch.results.length} contact(s)`);
-                  }
-                }
-              } catch (associationError) {
-                fastify.log.warn(`Failed to associate contacts for company ${result.id}: ${associationError.message}`);
-              }
+              const custNum = originalCustomer.Customer_CustNum ? padCustNum(originalCustomer.Customer_CustNum) : null;
+              await associateContactsToCompany(result.id, custNum);
             }
           }
         }
@@ -292,12 +256,8 @@ async function customerService(fastify, _) {
           continue;
         }
 
-        const query = {
-          epicorId: customer.RowIdent,
-          source: 'EpicorCustomers',
-        };
-
-        let existRecord = null;
+        // Search HubSpot directly by unique property to find existing company
+        let existingCompany = null;
 
         try {
           const searchData = await fastify.backoff(() =>
@@ -315,16 +275,20 @@ async function customerService(fastify, _) {
               },
             })
           );
-          existRecord = searchData.results?.[0] || null;
+          existingCompany = searchData.results?.[0] || null;
         } catch (searchError) {
           fastify.log.warn(`Customer ${custId} company search failed: ${searchError.message}`);
-          existRecord = null;
+          existingCompany = null;
         }
 
         const props = transformEpicorToHubSpot(customer);
         props.salesrep = normalizeSalesRepValue(props.salesrep, salesRepOptions.salesrep);
         props.salesrepa_name = normalizeSalesRepValue(props.salesrepa_name, salesRepOptions.salesrepa);
-        
+
+        if (!props[UNIQUE_PROPERTY]) {
+          props[UNIQUE_PROPERTY] = String(custId);
+        }
+
         const cleanProps = {};
         for (const [key, value] of Object.entries(props)) {
           if (value !== null && value !== undefined && value !== '') {
@@ -332,59 +296,19 @@ async function customerService(fastify, _) {
           }
         }
 
-        if (existRecord?.id || existRecord?.hubspotId) {
-          const companyId = existRecord?.hubspotId || existRecord?.id;
+        const custNum = customer.Customer_CustNum ? padCustNum(customer.Customer_CustNum) : null;
 
-          try {
-            await fastify.backoff(() =>
-              fastify.hubspotAdapter.updateCompany({ 
-                companyId, 
-                properties: cleanProps 
-              })
-            );
-          } catch (updateError) {
-            if (updateError?.response?.data?.message?.toLowerCase() === 'resource not found') {
-              await deleteDataBase(query);
-            } else {
-              throw updateError;
-            }
-          }
+        if (existingCompany?.id) {
+          const companyId = existingCompany.id;
 
-          if (existRecord?.hubspotId) {
-            await updateDataBase(query, { action: 'update' });
-          } else {
-            await createDataBase({
-              hubspotId: companyId,
-              epicorId: customer.RowIdent,
-              source: 'EpicorCustomers',
-              customerId: custId,
-              action: 'create'
-            });
-          }
+          await fastify.backoff(() =>
+            fastify.hubspotAdapter.updateCompany({ 
+              companyId, 
+              properties: cleanProps 
+            })
+          );
 
-          try {
-            const custNum = customer.Customer_CustNum ? padCustNum(customer.Customer_CustNum) : null;
-            if (custNum) {
-              const contactSearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
-              );
-              if (contactSearch.results?.length > 0) {
-                for (const contact of contactSearch.results) {
-                  await fastify.hubspotAdapter.ensureAssociation(
-                    'companies',
-                    companyId,
-                    'contacts',
-                    contact.id,
-                    HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
-                  );
-                }
-                fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
-              }
-            }
-          } catch (associationError) {
-            fastify.log.warn(`Failed to associate contacts for company ${companyId}: ${associationError.message}`);
-          }
-
+          await associateContactsToCompany(companyId, custNum);
           results.updated++;
         } else {
           const created = await fastify.backoff(() =>
@@ -392,37 +316,7 @@ async function customerService(fastify, _) {
           );
           const companyId = created.id;
 
-          await createDataBase({
-            hubspotId: companyId,
-            epicorId: customer.RowIdent,
-            source: 'EpicorCustomers',
-              customerId: custId,
-            action: 'create'
-          });
-
-          try {
-            const custNum = customer.Customer_CustNum ? padCustNum(customer.Customer_CustNum) : null;
-            if (custNum) {
-              const contactSearch = await fastify.backoff(() =>
-                fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', [custNum])
-              );
-              if (contactSearch.results?.length > 0) {
-                for (const contact of contactSearch.results) {
-                  await fastify.hubspotAdapter.ensureAssociation(
-                    'companies',
-                    companyId,
-                    'contacts',
-                    contact.id,
-                    HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
-                  );
-                }
-                fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
-              }
-            }
-          } catch (associationError) {
-            fastify.log.warn(`Failed to associate contacts for company ${companyId}: ${associationError.message}`);
-          }
-
+          await associateContactsToCompany(companyId, custNum);
           results.created++;
         }
 
@@ -525,7 +419,6 @@ async function customerService(fastify, _) {
 export default fp(customerService, {
   name: 'customerServices',
   dependencies: [
-    'customerRepository',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',

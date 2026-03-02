@@ -5,13 +5,6 @@ import fp from 'fastify-plugin';
 export default fp(
   async function lineItems(fastify, opts) {
     await fastify.register(AutoLoad, {
-      dir: join(import.meta.url, 'repositories'),
-      dirNameRoutePrefix: false,
-      indexPattern: /^lineItemRepository.js$/i,
-      options: { ...opts },
-    });
-
-    await fastify.register(AutoLoad, {
       dir: join(import.meta.url, 'services'),
       dirNameRoutePrefix: false,
       indexPattern: /orderProdMixServices\.js$/i,

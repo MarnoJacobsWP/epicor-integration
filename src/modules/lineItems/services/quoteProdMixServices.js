@@ -84,7 +84,6 @@ async function quoteProdMixService(fastify, _) {
 
   async function deleteHubSpotLineItem(lineItemId) {
     await fastify.backoff(() => fastify.hubspotAdapter.deleteLineItem(lineItemId));
-    await fastify.lineItemRepository.deleteDatabase({ hubspotId: String(lineItemId) }).catch(() => {});
   }
 
   async function createHubSpotLineItem(properties, dealId) {
@@ -97,21 +96,6 @@ async function quoteProdMixService(fastify, _) {
 
     const created = await fastify.backoff(() =>
       fastify.hubspotAdapter.createLineItem({ properties, associations })
-    );
-
-    const epicorId = `${properties.quotedtl_quotenum}|${properties.prodgrup_character01 || ''}|${properties.price || ''}`;
-
-    await fastify.lineItemRepository.insertDatabase({
-      epicorId: String(epicorId),
-      hubspotId: created.id,
-      source: 'EpicorQuoteProdMix',
-      quoteNum: properties.quotedtl_quotenum,
-      action: 'create',
-    }).catch(() =>
-      fastify.lineItemRepository.updateDatabase(
-        { epicorId: String(epicorId) },
-        { hubspotId: created.id, source: 'EpicorQuoteProdMix', quoteNum: properties.quotedtl_quotenum, action: 'create' },
-      ).catch(() => {})
     );
 
     return created;
@@ -244,7 +228,6 @@ async function quoteProdMixService(fastify, _) {
 export default fp(quoteProdMixService, {
   name: 'quoteProdMixService',
   dependencies: [
-    'lineItemRepository',
     'epicorAdapter',
     'hubspotAdapter',
     'backoff',
