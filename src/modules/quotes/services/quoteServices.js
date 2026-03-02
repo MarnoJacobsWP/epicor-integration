@@ -143,7 +143,7 @@ async function quoteService(fastify, _) {
   }
 
   /** Properties needed for cross-source deduplication scanning. */
-  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'amount', 'part'];
+  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'amount', 'quotedtl_partnum'];
 
   /**
    * Checks whether a deal has a SalesOrderNum, indicating it has

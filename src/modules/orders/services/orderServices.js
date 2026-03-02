@@ -160,7 +160,7 @@ async function orderService(fastify, _) {
   }
 
   /** Properties needed for cross-source deduplication scanning. */
-  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'amount', 'part'];
+  const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'amount', 'quotedtl_partnum'];
 
   /**
    * Scans all line items on a deal and removes cross-source duplicates.
