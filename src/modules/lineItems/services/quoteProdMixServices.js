@@ -13,7 +13,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'Calculated_Total', hubspot: 'price', transform: Number },//Unit Price
 ];
 /** Properties fetched from HubSpot for source filtering and comparison. */
-const FETCH_PROPERTIES = ['name', 'price', 'quotedtl_quotenum', 'hs_sku'];
+const FETCH_PROPERTIES = ['name', 'price', 'quotedtl_quotenum', 'part'];
 
 function transformEpicorToHubSpot(epicorRecord) {
   const result = {};
@@ -54,14 +54,14 @@ function deduplicateEpicorRecords(records) {
 
 /**
  * Filters HubSpot line items to only those originating from QuoteProdMix.
- * Identified by having quotedtl_quotenum set and hs_sku NOT set
- * (QSeatEtab items have hs_sku; OrderProdMix items lack quotedtl_quotenum).
+ * Identified by having quotedtl_quotenum set and part NOT set
+ * (QSeatEtab items have part; OrderProdMix items lack quotedtl_quotenum).
  */
 function filterQuoteProdMixItems(lineItems) {
   return lineItems.filter((item) => {
     const props = item.properties || {};
     const quoteNum = props.quotedtl_quotenum;
-    const hsSku = props.hs_sku;
+    const hsSku = props.part;
     const hasQuoteNum = quoteNum != null && String(quoteNum).trim() !== '';
     const hasSku = hsSku != null && String(hsSku).trim() !== '';
     return hasQuoteNum && !hasSku;
