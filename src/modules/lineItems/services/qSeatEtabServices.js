@@ -11,7 +11,7 @@ const FIELD_MAPPINGS = [
 ];
 
 /** Properties fetched from HubSpot for source filtering and dedup comparison. */
-const FETCH_PROPERTIES = ['name', 'hs_sku', 'quotedtl_quotenum'];
+const FETCH_PROPERTIES = ['name', 'quotedtl_partnum', 'quotedtl_quotenum'];
 const ALLOWED_PROD_GROUPS = new Set(['E-Tables', 'New Seating']);
 
 /**
@@ -19,10 +19,10 @@ const ALLOWED_PROD_GROUPS = new Set(['E-Tables', 'New Seating']);
  * QSeatEtab items use name + hs_sku for matching (they have no price field).
  */
 const QSEAT_ETAB_KEY_OPTIONS = {
-  desiredKeyFn: (item) => buildMatchKey(item.name, item.hs_sku),
+  desiredKeyFn: (item) => buildMatchKey(item.name, item.quotedtl_partnum),
   existingKeyFn: (item) => {
     const props = item.properties || {};
-    return buildMatchKey(props.name, props.hs_sku);
+    return buildMatchKey(props.name, props.quotedtl_partnum);
   },
 };
 
@@ -46,7 +46,7 @@ function buildCleanProperties(epicorRecord) {
   }
 
   props.name = props.prodgrup_description || 'Unnamed Product';
-  props.hs_sku = props.quotedtl_partnum;
+  props.quotedtl_partnum = props.quotedtl_partnum;
   props.description = props.quotedtl_linedesc;
 
   const clean = {};
@@ -63,7 +63,7 @@ function buildCleanProperties(epicorRecord) {
  */
 function filterQSeatEtabItems(lineItems) {
   return lineItems.filter((item) => {
-    const hsSku = item.properties?.hs_sku;
+    const hsSku = item.properties?.quotedtl_partnum;
     return hsSku != null && String(hsSku).trim() !== '';
   });
 }
