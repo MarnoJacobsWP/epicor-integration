@@ -292,7 +292,7 @@ async function orderService(fastify, _) {
         props = transformEpicorToHubSpot(order);
         props.dealname = generateDealName(order);
         if (quoteNum) {
-          props.quotehed_quotenum = String(quoteNum);
+          props.orderdtl_quotenum = String(quoteNum);
         }
         props.pipeline = HUBSPOT_PIPELINES.QUOTES;
         props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
