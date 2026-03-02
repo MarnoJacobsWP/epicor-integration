@@ -34,7 +34,7 @@ function transformEpicorToHubSpot(epicorCustomer) {
 async function customerService(fastify, _) {
   const { ENDPOINTS, BATCH_SIZES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const BATCH_SIZE = BATCH_SIZES.CUSTOMERS || 100;
-  const UNIQUE_PROPERTY = 'customer_custid_';
+  const UNIQUE_PROPERTY = 'customer_custid';
   const UNKNOWN_OPTION = 'Unknown Option';
 
   async function getValidOptions(propertyName) {
