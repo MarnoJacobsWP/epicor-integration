@@ -81,11 +81,77 @@ async function customerService(fastify, _) {
             contact.id,
             HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
           );
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
         fastify.log.info(`Associated company ${companyId} with ${contactSearch.results.length} contact(s)`);
       }
     } catch (associationError) {
       fastify.log.warn(`Failed to associate contacts for company ${companyId}: ${associationError.message}`);
+    }
+  }
+
+  async function batchAssociateContacts(batchResults, batchData) {
+    const custNumToCompanyId = new Map();
+    for (const result of batchResults) {
+      const customerCustId = result.properties?.[UNIQUE_PROPERTY];
+      if (!customerCustId) continue;
+      const batchItem = batchData.find(b => String(b.id).trim() === customerCustId);
+      const originalCustomer = batchItem?._original;
+      if (!originalCustomer) continue;
+      const custNum = originalCustomer.Customer_CustNum ? padCustNum(originalCustomer.Customer_CustNum) : null;
+      if (custNum) {
+        custNumToCompanyId.set(custNum, result.id);
+      }
+    }
+
+    if (custNumToCompanyId.size === 0) return;
+
+    const allCustNums = Array.from(custNumToCompanyId.keys());
+    let contactSearch;
+    try {
+      contactSearch = await fastify.backoff(() =>
+        fastify.hubspotAdapter.searchContactsByProperty('custcnt_custnum', allCustNums)
+      );
+    } catch (error) {
+      fastify.log.warn(`Batch contact search failed: ${error.message}`);
+      return;
+    }
+
+    if (!contactSearch.results?.length) return;
+
+    const contactsByCustNum = new Map();
+    for (const contact of contactSearch.results) {
+      const custNum = contact.properties?.custcnt_custnum;
+      if (!custNum) continue;
+      if (!contactsByCustNum.has(custNum)) {
+        contactsByCustNum.set(custNum, []);
+      }
+      contactsByCustNum.get(custNum).push(contact);
+    }
+
+    let totalAssociated = 0;
+    for (const [custNum, companyId] of custNumToCompanyId) {
+      const contacts = contactsByCustNum.get(custNum);
+      if (!contacts?.length) continue;
+      for (const contact of contacts) {
+        try {
+          await fastify.hubspotAdapter.ensureAssociation(
+            'companies',
+            companyId,
+            'contacts',
+            contact.id,
+            HUBSPOT_ASSOCIATIONS.COMPANY_TO_CONTACT
+          );
+          totalAssociated++;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+          fastify.log.warn(`Failed to associate contact ${contact.id} to company ${companyId}: ${error.message}`);
+        }
+      }
+    }
+
+    if (totalAssociated > 0) {
+      fastify.log.info(`Batch associated ${totalAssociated} contact(s) across ${custNumToCompanyId.size} companies`);
     }
   }
 
@@ -197,18 +263,9 @@ async function customerService(fastify, _) {
           } else {
             results.updated++;
           }
-          
-          const customerCustId = result.properties?.[UNIQUE_PROPERTY];
-          if (customerCustId) {
-            const batchItem = batchData.find(b => String(b.id).trim() === customerCustId);
-            const originalCustomer = batchItem?._original;
-            
-            if (originalCustomer) {
-              const custNum = originalCustomer.Customer_CustNum ? padCustNum(originalCustomer.Customer_CustNum) : null;
-              await associateContactsToCompany(result.id, custNum);
-            }
-          }
         }
+
+        await batchAssociateContacts(upsertResult.results, batchData);
       }
 
       if (upsertResult.numErrors > 0) {
