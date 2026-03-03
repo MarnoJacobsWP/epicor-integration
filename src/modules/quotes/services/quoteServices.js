@@ -435,7 +435,7 @@ async function quoteService(fastify, _) {
   }
 
   if (!fastify.hasDecorator('quoteTask')) {
-    fastify.decorate('quoteTask', { task });
+    fastify.decorate('quoteTask', { task, processQuotesIndividually });
   }
 }
 

@@ -435,7 +435,7 @@ async function orderService(fastify, _) {
   }
 
   if (!fastify.hasDecorator('orderTask')) {
-    fastify.decorate('orderTask', { task });
+    fastify.decorate('orderTask', { task, processOrdersIndividually });
   }
 }
 

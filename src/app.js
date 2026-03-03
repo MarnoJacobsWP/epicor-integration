@@ -100,6 +100,7 @@ export default async function app(fastify, opts) {
       'lineItems',
       'orders',
       'quotes',
+      'manualSync',
       'sync',
       'system',
       'epicorExport'
