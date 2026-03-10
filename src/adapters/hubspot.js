@@ -20,6 +20,11 @@ const normalizeProperties = (properties, maxLength = MAX_PROPERTY_LENGTH) => {
   if (!properties || typeof properties !== 'object') return cleaned;
 
   for (const [key, value] of Object.entries(properties)) {
+    // Preserve empty strings so callers can explicitly clear HubSpot properties
+    if (value === '') {
+      cleaned[key] = '';
+      continue;
+    }
     const normalized = normalizeString(value, maxLength);
     if (normalized !== null && normalized !== undefined && normalized !== '') {
       cleaned[key] = normalized;
