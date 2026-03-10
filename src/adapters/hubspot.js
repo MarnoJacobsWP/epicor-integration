@@ -676,7 +676,12 @@ class HubspotAdapter {
           const response = await this._makeRequest('GET', path);
           if (response.data) allLineItems.push(response.data);
         } catch (error) {
-          this.logger.warn(`Failed to fetch line item ${lineItemId} for deal ${dealId}: ${error.message}`);
+          const is404 = error.message?.includes('404') || error.statusCode === 404;
+          if (is404) {
+            this.logger.info(`Line item ${lineItemId} for deal ${dealId} no longer exists (stale association), skipping`);
+          } else {
+            this.logger.warn(`Failed to fetch line item ${lineItemId} for deal ${dealId}: ${error.message}`);
+          }
         }
       }
 

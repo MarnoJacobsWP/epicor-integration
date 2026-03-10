@@ -281,7 +281,7 @@ async function quoteService(fastify, _) {
           props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
         } else if (isLost) {
           props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_LOST;
-        } else if (!existRecord) {
+        } else {
           props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
         }
 
@@ -297,10 +297,6 @@ async function quoteService(fastify, _) {
 
           try {
             const updateProps = { ...props };
-            if (!isWon && !isLost) {
-              delete updateProps.pipeline;
-              delete updateProps.dealstage;
-            }
             await fastify.backoff(() =>
               fastify.hubspotAdapter.updateDeal({ dealId, properties: updateProps })
             );
