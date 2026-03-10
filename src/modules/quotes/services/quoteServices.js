@@ -291,6 +291,11 @@ async function quoteService(fastify, _) {
           }
         });
 
+        // Clear closedate when stage is Quote Created
+        if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+          props.closedate = '';
+        }
+
         if (existRecord?.id) {
           const dealId = existRecord.id;
           let needsCreate = false;
@@ -318,6 +323,9 @@ async function quoteService(fastify, _) {
           if (needsCreate) {
             if (!isWon && !isLost && !props.dealstage) {
               props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
+            }
+            if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+              props.closedate = '';
             }
 
             const created = await fastify.backoff(() =>
