@@ -291,8 +291,8 @@ async function quoteService(fastify, _) {
           }
         });
 
-        // Clear closedate when stage is Quote Created
-        if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+        // Clear closedate unless stage is Closed Won
+        if (props.dealstage !== HUBSPOT_DEAL_STAGES.CLOSED_WON) {
           props.closedate = '';
         }
 
@@ -324,7 +324,7 @@ async function quoteService(fastify, _) {
             if (!isWon && !isLost && !props.dealstage) {
               props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
             }
-            if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+            if (props.dealstage !== HUBSPOT_DEAL_STAGES.CLOSED_WON) {
               props.closedate = '';
             }
 
