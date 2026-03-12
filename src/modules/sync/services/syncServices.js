@@ -58,7 +58,7 @@ async function syncService(fastify, _) {
     return status;
   }
 
-  async function runFullSync(dateString) {
+  async function runFullSync(dateString, { skipCursor = false } = {}) {
     // ── Guard: prevent overlapping runs ──────────────────────────
     if (syncRunning) {
       fastify.log.warn('Full sync already in progress — skipping this run');
@@ -74,6 +74,16 @@ async function syncService(fastify, _) {
       errors: 0
     };
 
+    // When skipCursor is true, use the provided timestamp directly
+    // instead of looking up the stored cursor.
+    const getTimestamp = skipCursor
+      ? async (_syncType, fallback) => {
+          const ts = toUnixSeconds(fallback);
+          fastify.log.info(`Using provided timestamp (skipCursor): ${ts}`);
+          return ts;
+        }
+      : resolveTimestamp;
+
     try {
       const createdLog = await createDataBase(syncLog);
       syncLog._id = createdLog.insertedId;
@@ -86,12 +96,12 @@ async function syncService(fastify, _) {
 
       // ── Customers ──────────────────────────────────────────────
       try {
-        const customerTs = await resolveTimestamp('customers', dateString);
+        const customerTs = await getTimestamp('customers', dateString);
         fastify.log.info('Starting customers sync...');
         results.customers = await fastify.customerTask.task(customerTs);
         syncLog.recordsProcessed += results.customers?.syncedCount || 0;
         syncLog.errors += results.customers?.errorCount || 0;
-        await advanceCursor('customers');
+        if (!skipCursor) await advanceCursor('customers');
       } catch (error) {
         fastify.log.error(`Customers sync failed: ${error.message}`);
         syncLog.errors++;
@@ -99,12 +109,12 @@ async function syncService(fastify, _) {
 
       // Quotes phase: Quotes → QuoteProdMix → QSeatEtab (handled within quoteTask)
       try {
-        const quoteTs = await resolveTimestamp('quotes', dateString);
+        const quoteTs = await getTimestamp('quotes', dateString);
         fastify.log.info('Starting quotes sync...');
         results.quotes = await fastify.quoteTask.task(quoteTs);
         syncLog.recordsProcessed += results.quotes?.syncedCount || 0;
         syncLog.errors += results.quotes?.errorCount || 0;
-        await advanceCursor('quotes');
+        if (!skipCursor) await advanceCursor('quotes');
       } catch (error) {
         fastify.log.error(`Quotes sync failed: ${error.message}`);
         syncLog.errors++;
@@ -113,12 +123,12 @@ async function syncService(fastify, _) {
       // Orders phase: Orders → OrderProdMix → QSeatEtab (handled within orderTask)
       // Must run AFTER quotes are fully complete
       try {
-        const orderTs = await resolveTimestamp('orders', dateString);
+        const orderTs = await getTimestamp('orders', dateString);
         fastify.log.info('Starting orders sync...');
         results.orders = await fastify.orderTask.task(orderTs);
         syncLog.recordsProcessed += results.orders?.syncedCount || 0;
         syncLog.errors += results.orders?.errorCount || 0;
-        await advanceCursor('orders');
+        if (!skipCursor) await advanceCursor('orders');
       } catch (error) {
         fastify.log.error(`Orders sync failed: ${error.message}`);
         syncLog.errors++;

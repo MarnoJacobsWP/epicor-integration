@@ -54,7 +54,7 @@ export default fp(
       try {
         const timestamp = fastify.constants.FILTER_TIMESTAMP;
         fastify.log.info(`Test sync triggered with hardcoded timestamp: ${timestamp}`);
-        const result = await fastify.syncService.runFullSync(timestamp);
+        const result = await fastify.syncService.runFullSync(timestamp, { skipCursor: true });
         return result;
       } catch (error) {
         fastify.log.error(`Test sync failed: ${error.message}`);
