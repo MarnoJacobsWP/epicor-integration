@@ -45,6 +45,26 @@ export default fp(
       }
     });
 
+    /**
+     * POST /sync/test
+     * Runs a full sync using the hardcoded FILTER_TIMESTAMP from constants.
+     * Useful for reprocessing records that were missed.
+     */
+    fastify.post('/sync/test', async (request, reply) => {
+      try {
+        const timestamp = fastify.constants.FILTER_TIMESTAMP;
+        fastify.log.info(`Test sync triggered with hardcoded timestamp: ${timestamp}`);
+        const result = await fastify.syncService.runFullSync(timestamp);
+        return result;
+      } catch (error) {
+        fastify.log.error(`Test sync failed: ${error.message}`);
+        return reply.status(500).send({
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
     fastify.log.info('Sync module loaded');
   },
   {
