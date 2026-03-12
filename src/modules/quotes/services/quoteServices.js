@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
+import { toUnixSeconds } from '../../../utils/dateHelper.js';
 import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
 
 const toMidnightUTC = (v) => {
@@ -379,8 +380,9 @@ async function quoteService(fastify, _) {
 
   async function taskQuotes(dateString) {
     try {
-      fastify.log.info('Fetching quotes from Epicor...');
-      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(ENDPOINTS.QUOTES);
+      const filterTimestamp = toUnixSeconds(dateString);
+      fastify.log.info(`Fetching quotes from Epicor (filter timestamp: ${filterTimestamp})...`);
+      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(ENDPOINTS.QUOTES, filterTimestamp);
       
       if (!records?.length) {
         return { success: false, message: 'No quotes found', metadata };

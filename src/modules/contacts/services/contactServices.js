@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { chunkArray, padCustNum } from '../../../utils/arrayHelpers.js';
+import { toUnixSeconds } from '../../../utils/dateHelper.js';
 
 const FIELD_MAPPINGS = [
   { epicor: 'CustCnt_CustNum', hubspot: 'custcnt_custnum', transform: padCustNum },
@@ -238,8 +239,9 @@ async function contactService(fastify, _) {
   }
 
   async function syncFilteredContacts(dateString) {
-    fastify.log.info('Fetching contacts from Epicor...');
-    const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(ENDPOINTS.CONTACTS);
+    const filterTimestamp = toUnixSeconds(dateString);
+    fastify.log.info(`Fetching contacts from Epicor (filter timestamp: ${filterTimestamp})...`);
+    const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(ENDPOINTS.CONTACTS, filterTimestamp);
     
     if (!records?.length) {
       fastify.log.warn('No contacts found');

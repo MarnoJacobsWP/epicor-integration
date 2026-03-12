@@ -33,6 +33,39 @@ async function findLastSync(collection, syncType) {
   );
 }
 
+/**
+ * Retrieve the last-known sync cursor (Unix-seconds timestamp) for a given
+ * sync type.  Returns `null` when no cursor has been stored yet.
+ */
+async function getSyncCursor(collection, syncType) {
+  const doc = await collection.findOne(
+    { _type: 'sync_cursor', syncType },
+  );
+  return doc?.timestamp ?? null;
+}
+
+/**
+ * Persist a sync cursor so the next run knows where to pick up.
+ * Uses upsert so the first call creates the document.
+ *
+ * @param {string}  syncType  e.g. 'contacts', 'customers', 'orders', 'quotes', 'full'
+ * @param {number}  timestamp Unix-seconds value to store
+ */
+async function setSyncCursor(collection, syncType, timestamp) {
+  return collection.updateOne(
+    { _type: 'sync_cursor', syncType },
+    {
+      $set: {
+        _type: 'sync_cursor',
+        syncType,
+        timestamp,
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+}
+
 async function syncRepository(fastify) {
   const collection = fastify.mongo.db.collection('sync_logs');
 
@@ -44,6 +77,8 @@ async function syncRepository(fastify) {
       insertDatabase: (data) => insertDatabase(collection, data),
       deleteDatabase: (filter) => deleteDatabase(collection, filter),
       findLastSync: (syncType) => findLastSync(collection, syncType),
+      getSyncCursor: (syncType) => getSyncCursor(collection, syncType),
+      setSyncCursor: (syncType, timestamp) => setSyncCursor(collection, syncType, timestamp),
     });
   }
 }

@@ -13,8 +13,9 @@ export default fp(
 
     fastify.post('/syncContacts', async (request, reply) => {
       try {
-        const dateString = fastify.utils?.getSyncDate(fastify.constants.SYNC_INTERVAL) || new Date().toISOString();
-        const result = await fastify.contactTask.task(dateString);
+        const timestamp = await fastify.syncService.resolveTimestamp('contacts');
+        const result = await fastify.contactTask.task(timestamp);
+        await fastify.syncService.advanceCursor('contacts');
         return result;
       } catch (error) {
         fastify.log.error(`Contact sync failed: ${error.message}`);

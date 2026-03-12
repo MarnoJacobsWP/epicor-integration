@@ -1,4 +1,4 @@
-import { parseEstDate, parseEstTimestamp, nowEst, formatForSync, getSyncDate } from './dateHelper.js';
+import { parseEstDate, parseEstTimestamp, nowEst, formatForSync, getSyncDate, toUnixSeconds } from './dateHelper.js';
 
 export default {
   parseEstDate,
@@ -6,4 +6,5 @@ export default {
   nowEst,
   formatForSync,
   getSyncDate,
+  toUnixSeconds,
 };

@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
+import { toUnixSeconds } from '../../../utils/dateHelper.js';
 import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
 
 const toMidnightUTC = (v) => {
@@ -375,8 +376,9 @@ async function orderService(fastify, _) {
 
   async function taskOrders(dateString) {
     try {
-      fastify.log.info('Fetching orders from Epicor...');
-      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(ENDPOINTS.ORDERS);
+      const filterTimestamp = toUnixSeconds(dateString);
+      fastify.log.info(`Fetching orders from Epicor (filter timestamp: ${filterTimestamp})...`);
+      const { records, metadata } = await fastify.epicorAdapter.fetchFilteredRecords(ENDPOINTS.ORDERS, filterTimestamp);
       
       if (!records?.length) {
         return { success: false, message: 'No orders found', metadata };
