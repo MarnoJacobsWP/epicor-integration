@@ -19,11 +19,12 @@ const ORDER_NUMS = [
 ];
 
 const QUOTE_NUMS = [
-  162850
+  
 ];
 
 // Customer IDs (CustID) or Customer Numbers (CustNum) to target
 const CUSTOMER_IDS = [
+  3908
 ];
 // ───────────────────────────────────────────────────────────────
 
