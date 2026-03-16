@@ -207,6 +207,18 @@ async function customerService(fastify, _) {
         if (!properties[UNIQUE_PROPERTY]) {
           properties[UNIQUE_PROPERTY] = custIdStr;
         }
+
+        // Ensure customer_custnum is always set when Customer_CustNum is available
+        if (!properties.customer_custnum && customer.Customer_CustNum) {
+          const derivedCustNum = padCustNum(customer.Customer_CustNum);
+          if (derivedCustNum) {
+            properties.customer_custnum = derivedCustNum;
+          }
+        }
+
+        if (!properties.customer_custnum) {
+          fastify.log.warn(`Customer ${custIdStr} (${customer.Customer_Name || 'Unknown'}) has no customer_custnum value. Customer_CustNum from Epicor: ${customer.Customer_CustNum ?? 'undefined'}`);
+        }
         
         const cleanProperties = {};
         for (const [key, value] of Object.entries(properties)) {
@@ -224,6 +236,8 @@ async function customerService(fastify, _) {
           continue;
         }
         
+        fastify.log.debug(`Customer ${custIdStr}: customer_id=${cleanProperties.customer_id || 'MISSING'}, customer_custnum=${cleanProperties.customer_custnum || 'MISSING'}, name=${cleanProperties.name || 'MISSING'}`);
+
         batchData.push({
           id: custIdStr,
           properties: cleanProperties,
@@ -345,6 +359,18 @@ async function customerService(fastify, _) {
 
         if (!props[UNIQUE_PROPERTY]) {
           props[UNIQUE_PROPERTY] = String(custId);
+        }
+
+        // Ensure customer_custnum is always set when Customer_CustNum is available
+        if (!props.customer_custnum && customer.Customer_CustNum) {
+          const derivedCustNum = padCustNum(customer.Customer_CustNum);
+          if (derivedCustNum) {
+            props.customer_custnum = derivedCustNum;
+          }
+        }
+
+        if (!props.customer_custnum) {
+          fastify.log.warn(`Customer ${custId} (${custName}) has no customer_custnum value. Customer_CustNum from Epicor: ${customer.Customer_CustNum ?? 'undefined'}`);
         }
 
         const cleanProps = {};
@@ -470,7 +496,8 @@ async function customerService(fastify, _) {
   if (!fastify.hasDecorator('customerTask')) {
     fastify.decorate('customerTask', { 
       task,
-      processCustomerBatch
+      processCustomerBatch,
+      processCustomersIndividually
     });
   }
 }

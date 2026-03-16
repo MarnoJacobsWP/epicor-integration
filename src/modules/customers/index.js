@@ -60,7 +60,7 @@ export default fp(
           epicorData: customer,
           hubspotProperties: properties,
           validation: {
-            hasId: !!properties.customer_custid_,
+            hasId: !!properties.customer_id,
             hasName: !!properties.name,
             allProperties: Object.keys(properties)
           }

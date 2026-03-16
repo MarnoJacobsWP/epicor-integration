@@ -18,7 +18,8 @@ export function chunkArray(array, size) {
  * @returns {string|null} Padded customer number or null if invalid
  */
 export function padCustNum(value) {
-  if (!value) return null;
+  if (value == null || value === '') return null;
   const str = String(value).trim();
+  if (!str) return null;
   return str.padStart(4, '0');
 }

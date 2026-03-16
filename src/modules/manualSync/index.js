@@ -21,6 +21,10 @@ const ORDER_NUMS = [
 const QUOTE_NUMS = [
   162850
 ];
+
+// Customer IDs (CustID) or Customer Numbers (CustNum) to target
+const CUSTOMER_IDS = [
+];
 // ───────────────────────────────────────────────────────────────
 
 export default fp(
@@ -145,26 +149,102 @@ export default fp(
       return { success: true, ...results };
     }
 
+    /**
+     * Fetch customer records from Epicor for specified Customer IDs
+     * or Customer Numbers and run them through the standard customer
+     * processing pipeline.
+     *
+     * Each value is tried against both Customer_CustID and
+     * Customer_CustNum so you can pass either identifier.
+     */
+    async function processManualCustomers(customerIds) {
+      if (!customerIds.length) {
+        return { skipped: true, message: 'No customer IDs provided' };
+      }
+
+      fastify.log.info(`Manual sync: fetching ${customerIds.length} customer(s) from Epicor...`);
+
+      // Pull the full customer dataset (no per-record filter field exists
+      // in the BAQ), then cherry-pick the requested IDs.
+      let allEpicorCustomers;
+      try {
+        const { records } = await fastify.epicorAdapter.fetchAllRecords(ENDPOINTS.CUSTOMERS);
+        allEpicorCustomers = records || [];
+      } catch (error) {
+        fastify.log.error(`Manual sync: Epicor customer fetch failed: ${error.message}`);
+        return { success: false, message: `Epicor fetch failed: ${error.message}` };
+      }
+
+      if (!allEpicorCustomers.length) {
+        return { success: false, message: 'No customer records returned from Epicor' };
+      }
+
+      // Normalize the requested IDs for comparison
+      const requestedSet = new Set(customerIds.map((id) => String(id).trim()));
+
+      const matched = allEpicorCustomers.filter((c) => {
+        const custId = String(c.Customer_CustID ?? '').trim();
+        const custNum = String(c.Customer_CustNum ?? '').trim();
+        return requestedSet.has(custId) || requestedSet.has(custNum);
+      });
+
+      if (!matched.length) {
+        fastify.log.warn(
+          `Manual sync: None of the requested customer IDs [${[...requestedSet].join(', ')}] were found in Epicor`,
+        );
+        return {
+          success: false,
+          message: 'No matching customer records found in Epicor',
+          requestedIds: [...requestedSet],
+        };
+      }
+
+      // Deduplicate – keep latest per CustID
+      const customerMap = new Map();
+      for (const record of matched) {
+        const key = String(record.Customer_CustID || record.Customer_CustNum).trim();
+        const existing = customerMap.get(key);
+        if (!existing || record.Calculated_Time > existing.Calculated_Time) {
+          customerMap.set(key, record);
+        }
+      }
+
+      const uniqueRecords = Array.from(customerMap.values());
+      fastify.log.info(`Manual sync: ${uniqueRecords.length} unique customer(s) to process`);
+
+      const results = { total: uniqueRecords.length, created: 0, updated: 0, errors: 0, skipped: 0 };
+      await fastify.customerTask.processCustomersIndividually(uniqueRecords, results);
+
+      fastify.log.info(
+        `Manual customer sync complete: ${results.created} created, ${results.updated} updated, ${results.errors} errors`,
+      );
+
+      return { success: true, ...results };
+    }
+
     // ── Route ───────────────────────────────────────────────────
     fastify.post('/manualSync', async (request, reply) => {
       try {
         // Allow overriding via request body, fall back to hard-coded arrays
         const orderNums = request.body?.orderNums ?? ORDER_NUMS;
         const quoteNums = request.body?.quoteNums ?? QUOTE_NUMS;
+        const customerIds = request.body?.customerIds ?? CUSTOMER_IDS;
 
         fastify.log.info(
-          `Manual sync triggered — Orders: [${orderNums.join(', ')}], Quotes: [${quoteNums.join(', ')}]`,
+          `Manual sync triggered — Orders: [${orderNums.join(', ')}], Quotes: [${quoteNums.join(', ')}], Customers: [${customerIds.join(', ')}]`,
         );
 
-        const [orderResults, quoteResults] = await Promise.all([
+        const [orderResults, quoteResults, customerResults] = await Promise.all([
           processManualOrders(orderNums),
           processManualQuotes(quoteNums),
+          processManualCustomers(customerIds),
         ]);
 
         return {
           success: true,
           orders: orderResults,
           quotes: quoteResults,
+          customers: customerResults,
         };
       } catch (error) {
         fastify.log.error(`Manual sync failed: ${error.message}`);
@@ -180,6 +260,7 @@ export default fp(
   {
     name: 'manualSync',
     dependencies: [
+      'customers',
       'orders',
       'quotes',
       'epicorAdapter',

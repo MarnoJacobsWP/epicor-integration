@@ -216,7 +216,7 @@ class HubspotAdapter {
     return options;
   }
 
-  async batchUpsertCompanies(batchData, idProperty = 'customer_custid_') {
+  async batchUpsertCompanies(batchData, idProperty = 'customer_id') {
     if (!Array.isArray(batchData)) {
       throw new TypeError('batchUpsertCompanies requires an array of records');
     }
