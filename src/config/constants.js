@@ -34,8 +34,11 @@ export const constants = {
     INITIAL_SKIP: 0,
   },
   REQUEST_TIMEOUT: process.env.NODE_ENV === 'production' ? 45000 : 30000,
-  //FILTER_TIMESTAMP: 1772371245,
+  //FILTER_TIMESTAMP: 1773149040,
   FILTER_TIMESTAMP: Math.floor((Date.now() - 5 * 60 * 1000) / 1000),
+  // Set this to a Unix timestamp (seconds) to reprocess records from a specific point in time.
+  // Use /sync/test to trigger a full sync with this timestamp.
+  FILTER_TIMESTAMP_HARDCODED: 1773149040,
   TABLE_RELATIONSHIPS: {
     ORDER_PROD_MIX: {
       parentTable: 'ORDERS',

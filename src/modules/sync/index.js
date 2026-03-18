@@ -47,13 +47,15 @@ export default fp(
 
     /**
      * POST /sync/test
-     * Runs a full sync using the hardcoded FILTER_TIMESTAMP from constants.
-     * Useful for reprocessing records that were missed.
+     * Runs a full sync using the hardcoded FILTER_TIMESTAMP_HARDCODED from constants.
+     * Edit that value in config/constants.js to target a specific point in time.
+     * Useful for reprocessing records from a known timestamp without
+     * touching the live FILTER_TIMESTAMP.
      */
     fastify.post('/sync/test', async (request, reply) => {
       try {
-        const timestamp = fastify.constants.FILTER_TIMESTAMP;
-        fastify.log.info(`Test sync triggered with hardcoded timestamp: ${timestamp}`);
+        const timestamp = fastify.constants.FILTER_TIMESTAMP_HARDCODED;
+        fastify.log.info(`Test sync triggered with hardcoded timestamp: ${timestamp} (${new Date(timestamp * 1000).toISOString()})`);
         const result = await fastify.syncService.runFullSync(timestamp, { skipCursor: true });
         return result;
       } catch (error) {
