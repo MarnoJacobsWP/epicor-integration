@@ -14,8 +14,9 @@ export default fp(
     fastify.post('/syncCustomers', async (request, reply) => {
       try {
         const timestamp = await fastify.syncService.resolveTimestamp('customers');
+        const syncStart = Math.floor(Date.now() / 1000);
         const result = await fastify.customerTask.task(timestamp);
-        await fastify.syncService.advanceCursor('customers');
+        await fastify.syncService.advanceCursor('customers', syncStart);
         return result;
       } catch (error) {
         fastify.log.error(`Customer sync failed: ${error.message}`);

@@ -30,13 +30,21 @@ async function syncService(fastify, _) {
   }
 
   /**
-   * Persist the current Unix-seconds time as the cursor so the next
-   * run picks up where this one started.
+   * Persist a Unix-seconds timestamp as the cursor so the next run
+   * picks up from that point.
+   *
+   * When `timestamp` is supplied (recommended) the cursor is set to
+   * that exact value — typically the moment just *before* the Epicor
+   * fetch began.  This eliminates the gap where records modified
+   * during processing would be skipped.
+   *
+   * @param {string} syncType  e.g. 'customers', 'orders', 'quotes'
+   * @param {number} [timestamp]  Unix-seconds value; defaults to now.
    */
-  async function advanceCursor(syncType) {
-    const now = Math.floor(Date.now() / 1000);
-    await fastify.syncRepository.setSyncCursor(syncType, now);
-    fastify.log.info(`Advanced ${syncType} cursor to ${now}`);
+  async function advanceCursor(syncType, timestamp) {
+    const ts = timestamp ?? Math.floor(Date.now() / 1000);
+    await fastify.syncRepository.setSyncCursor(syncType, ts);
+    fastify.log.info(`Advanced ${syncType} cursor to ${ts} (${new Date(ts * 1000).toISOString()})`);
   }
 
   async function getSyncStatus() {
@@ -97,11 +105,14 @@ async function syncService(fastify, _) {
       // ── Customers ──────────────────────────────────────────────
       try {
         const customerTs = await getTimestamp('customers', dateString);
-        fastify.log.info('Starting customers sync...');
+        // Capture the moment before fetching so the cursor covers
+        // any records modified while we are processing.
+        const customerSyncStart = Math.floor(Date.now() / 1000);
+        fastify.log.info(`Starting customers sync (query ts: ${customerTs}, cursor will advance to: ${customerSyncStart})...`);
         results.customers = await fastify.customerTask.task(customerTs);
         syncLog.recordsProcessed += results.customers?.syncedCount || 0;
         syncLog.errors += results.customers?.errorCount || 0;
-        if (!skipCursor) await advanceCursor('customers');
+        if (!skipCursor) await advanceCursor('customers', customerSyncStart);
       } catch (error) {
         fastify.log.error(`Customers sync failed: ${error.message}`);
         syncLog.errors++;
@@ -110,11 +121,12 @@ async function syncService(fastify, _) {
       // Quotes phase: Quotes → QuoteProdMix → QSeatEtab (handled within quoteTask)
       try {
         const quoteTs = await getTimestamp('quotes', dateString);
-        fastify.log.info('Starting quotes sync...');
+        const quoteSyncStart = Math.floor(Date.now() / 1000);
+        fastify.log.info(`Starting quotes sync (query ts: ${quoteTs}, cursor will advance to: ${quoteSyncStart})...`);
         results.quotes = await fastify.quoteTask.task(quoteTs);
         syncLog.recordsProcessed += results.quotes?.syncedCount || 0;
         syncLog.errors += results.quotes?.errorCount || 0;
-        if (!skipCursor) await advanceCursor('quotes');
+        if (!skipCursor) await advanceCursor('quotes', quoteSyncStart);
       } catch (error) {
         fastify.log.error(`Quotes sync failed: ${error.message}`);
         syncLog.errors++;
@@ -124,11 +136,12 @@ async function syncService(fastify, _) {
       // Must run AFTER quotes are fully complete
       try {
         const orderTs = await getTimestamp('orders', dateString);
-        fastify.log.info('Starting orders sync...');
+        const orderSyncStart = Math.floor(Date.now() / 1000);
+        fastify.log.info(`Starting orders sync (query ts: ${orderTs}, cursor will advance to: ${orderSyncStart})...`);
         results.orders = await fastify.orderTask.task(orderTs);
         syncLog.recordsProcessed += results.orders?.syncedCount || 0;
         syncLog.errors += results.orders?.errorCount || 0;
-        if (!skipCursor) await advanceCursor('orders');
+        if (!skipCursor) await advanceCursor('orders', orderSyncStart);
       } catch (error) {
         fastify.log.error(`Orders sync failed: ${error.message}`);
         syncLog.errors++;
