@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { toUnixSeconds } from '../../../utils/dateHelper.js';
+import { LOOKBACK_BUFFER } from '../../../config/constants.js';
 
 async function syncService(fastify, _) {
   // ── Mutex ──────────────────────────────────────────────────────
@@ -16,17 +17,31 @@ async function syncService(fastify, _) {
   // ── Cursor helpers ─────────────────────────────────────────────
   /**
    * Return a Unix-seconds timestamp for a given sync type.
-   * Priority: stored cursor → dateString fallback → now-5 min.
+   *
+   * Uses the EARLIER of:
+   *   • the stored cursor (important when the server was down > LOOKBACK_BUFFER)
+   *   • now − LOOKBACK_BUFFER (ensures a rolling overlap every run)
+   *
+   * If no cursor exists yet, falls back to dateStringFallback → now-5 min.
    */
   async function resolveTimestamp(syncType, dateStringFallback) {
+    const lookbackTs = Math.floor(Date.now() / 1000) - LOOKBACK_BUFFER;
     const cursor = await fastify.syncRepository.getSyncCursor(syncType);
+
     if (cursor) {
-      fastify.log.info(`Using stored cursor for ${syncType}: ${cursor}`);
-      return cursor;
+      const effective = Math.min(cursor, lookbackTs);
+      fastify.log.info(
+        `Cursor for ${syncType}: stored=${cursor}, lookback=${lookbackTs}, using=${effective} (${new Date(effective * 1000).toISOString()})`,
+      );
+      return effective;
     }
+
     const ts = toUnixSeconds(dateStringFallback);
-    fastify.log.info(`No cursor for ${syncType}, falling back to computed timestamp: ${ts}`);
-    return ts;
+    const effective = Math.min(ts, lookbackTs);
+    fastify.log.info(
+      `No cursor for ${syncType}, fallback=${ts}, lookback=${lookbackTs}, using=${effective} (${new Date(effective * 1000).toISOString()})`,
+    );
+    return effective;
   }
 
   /**
