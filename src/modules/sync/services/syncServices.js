@@ -127,7 +127,7 @@ async function syncService(fastify, _) {
         results.customers = await fastify.customerTask.task(customerTs);
         syncLog.recordsProcessed += results.customers?.syncedCount || 0;
         syncLog.errors += results.customers?.errorCount || 0;
-        if (!skipCursor) await advanceCursor('customers', customerSyncStart);
+        if (!skipCursor && results.customers?.syncedCount > 0) await advanceCursor('customers', customerSyncStart);
       } catch (error) {
         fastify.log.error(`Customers sync failed: ${error.message}`);
         syncLog.errors++;
@@ -141,7 +141,7 @@ async function syncService(fastify, _) {
         results.quotes = await fastify.quoteTask.task(quoteTs);
         syncLog.recordsProcessed += results.quotes?.syncedCount || 0;
         syncLog.errors += results.quotes?.errorCount || 0;
-        if (!skipCursor) await advanceCursor('quotes', quoteSyncStart);
+        if (!skipCursor && results.quotes?.syncedCount > 0) await advanceCursor('quotes', quoteSyncStart);
       } catch (error) {
         fastify.log.error(`Quotes sync failed: ${error.message}`);
         syncLog.errors++;
@@ -156,7 +156,7 @@ async function syncService(fastify, _) {
         results.orders = await fastify.orderTask.task(orderTs);
         syncLog.recordsProcessed += results.orders?.syncedCount || 0;
         syncLog.errors += results.orders?.errorCount || 0;
-        if (!skipCursor) await advanceCursor('orders', orderSyncStart);
+        if (!skipCursor && results.orders?.syncedCount > 0) await advanceCursor('orders', orderSyncStart);
       } catch (error) {
         fastify.log.error(`Orders sync failed: ${error.message}`);
         syncLog.errors++;

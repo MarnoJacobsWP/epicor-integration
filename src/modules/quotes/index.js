@@ -16,7 +16,7 @@ export default fp(
         const timestamp = await fastify.syncService.resolveTimestamp('quotes');
         const syncStart = Math.floor(Date.now() / 1000);
         const result = await fastify.quoteTask.task(timestamp);
-        await fastify.syncService.advanceCursor('quotes', syncStart);
+        if (result?.syncedCount > 0) await fastify.syncService.advanceCursor('quotes', syncStart);
         return result;
       } catch (error) {
         fastify.log.error(`Quote sync failed: ${error.message}`);
