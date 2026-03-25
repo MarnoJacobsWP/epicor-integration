@@ -33,8 +33,7 @@ export default fp(
 
     fastify.post('/sync/all', async (request, reply) => {
       try {
-        const dateString = fastify.utils?.getSyncDate(fastify.constants.SYNC_INTERVAL) || new Date().toISOString();
-        const result = await fastify.syncService.runFullSync(dateString);
+        const result = await fastify.syncService.runFullSync();
         return result;
       } catch (error) {
         fastify.log.error(`Full sync failed: ${error.message}`);
@@ -56,7 +55,7 @@ export default fp(
       try {
         const timestamp = fastify.constants.FILTER_TIMESTAMP_HARDCODED;
         fastify.log.info(`Test sync triggered with hardcoded timestamp: ${timestamp} (${new Date(timestamp * 1000).toISOString()})`);
-        const result = await fastify.syncService.runFullSync(timestamp, { skipCursor: true });
+        const result = await fastify.syncService.runFullSync(null, { overrideTimestamp: timestamp });
         return result;
       } catch (error) {
         fastify.log.error(`Test sync failed: ${error.message}`);

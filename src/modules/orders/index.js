@@ -13,9 +13,8 @@ export default fp(
 
     fastify.post('/syncOrders', async (request, reply) => {
       try {
-        const timestamp = await fastify.syncService.resolveTimestamp('orders');
+        const timestamp = fastify.syncService.getLookbackTimestamp();
         const result = await fastify.orderTask.task(timestamp);
-        await fastify.syncService.advanceCursorFromResult('orders', result);
         return result;
       } catch (error) {
         fastify.log.error(`Order sync failed: ${error.message}`);
