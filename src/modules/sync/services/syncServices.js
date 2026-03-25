@@ -83,8 +83,11 @@ async function syncService(fastify, _) {
     const actuallyProcessed = (result?.createdCount || 0) + (result?.updatedCount || 0);
 
     if (actuallyProcessed > 0 && result?.maxCalcTime > 0) {
-      fastify.log.info(`${syncType}: ${actuallyProcessed} records synced, advancing cursor to maxCalcTime=${result.maxCalcTime}`);
-      await advanceCursor(syncType, result.maxCalcTime);
+      // Advance cursor to maxCalcTime + 1 so the inclusive `ge` filter
+      // excludes records we just processed at exactly maxCalcTime.
+      const nextCursor = result.maxCalcTime + 1;
+      fastify.log.info(`${syncType}: ${actuallyProcessed} records synced, advancing cursor past maxCalcTime=${result.maxCalcTime} to ${nextCursor}`);
+      await advanceCursor(syncType, nextCursor);
       return;
     }
 
