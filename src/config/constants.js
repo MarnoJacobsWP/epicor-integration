@@ -38,7 +38,7 @@ export const constants = {
   FILTER_TIMESTAMP: Math.floor((Date.now() - 5 * 60 * 1000) / 1000),
   // Set this to a Unix timestamp (seconds) to reprocess records from a specific point in time.
   // Use /sync/test to trigger a full sync with this timestamp.
-  FILTER_TIMESTAMP_HARDCODED: 1773843062,
+  FILTER_TIMESTAMP_HARDCODED: 1774396800,
   TABLE_RELATIONSHIPS: {
     ORDER_PROD_MIX: {
       parentTable: 'ORDERS',
