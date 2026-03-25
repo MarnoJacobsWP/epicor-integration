@@ -385,7 +385,11 @@ async function orderService(fastify, _) {
       }
 
       const orderMap = new Map();
+      let maxCalcTime = 0;
       for (const order of records) {
+        if (order.Calculated_Time > maxCalcTime) {
+          maxCalcTime = order.Calculated_Time;
+        }
         const orderNum = order.OrderHed_OrderNum;
         const existing = orderMap.get(orderNum);
         if (!existing || order.Calculated_Time > existing.Calculated_Time) {
@@ -418,6 +422,7 @@ async function orderService(fastify, _) {
         errorCount: totalResults.errors,
         skippedCount: totalResults.skipped,
         totalEpicorOrders: records.length,
+        maxCalcTime,
         metadata
       };
     } catch (error) {

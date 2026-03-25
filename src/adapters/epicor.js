@@ -170,7 +170,7 @@ export default fp(
         let pagesFetched = 0;
         const startTime = Date.now();
 
-        const odataFilter = `Calculated_Time gt ${timestamp}`;
+        const odataFilter = `Calculated_Time ge ${timestamp}`;
 
         while (true) {
           const url = `${this.baseURL}/${queryName}/Data?$top=${top}&$skip=${skip}&$filter=${encodeURIComponent(odataFilter)}`;

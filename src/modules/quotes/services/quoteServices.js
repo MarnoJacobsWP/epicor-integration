@@ -389,7 +389,11 @@ async function quoteService(fastify, _) {
       }
 
       const quoteMap = new Map();
+      let maxCalcTime = 0;
       for (const quote of records) {
+        if (quote.Calculated_Time > maxCalcTime) {
+          maxCalcTime = quote.Calculated_Time;
+        }
         const quoteNum = quote.QuoteHed_QuoteNum;
         const existing = quoteMap.get(quoteNum);
         if (!existing || quote.Calculated_Time > existing.Calculated_Time) {
@@ -422,6 +426,7 @@ async function quoteService(fastify, _) {
         errorCount: totalResults.errors,
         skippedCount: totalResults.skipped,
         totalEpicorQuotes: records.length,
+        maxCalcTime,
         metadata
       };
     } catch (error) {

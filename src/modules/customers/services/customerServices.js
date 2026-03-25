@@ -429,7 +429,11 @@ async function customerService(fastify, _) {
       }
 
       const customerMap = new Map();
+      let maxCalcTime = 0;
       for (const customer of records) {
+        if (customer.Calculated_Time > maxCalcTime) {
+          maxCalcTime = customer.Calculated_Time;
+        }
         const custIdRaw = customer.Customer_CustID || customer.Customer_CustNum;
         const custId = padCustNum(custIdRaw);
         if (!custId) continue;
@@ -475,6 +479,7 @@ async function customerService(fastify, _) {
         skippedCount: totalResults.skipped,
         totalEpicorCustomers: records.length,
         batchCount: batches.length,
+        maxCalcTime,
         metadata
       };
     } catch (error) {
