@@ -60,7 +60,8 @@ export const constants = {
   DEPENDENT_TABLES: ['ORDER_PROD_MIX', 'QUOTE_PROD_MIX', 'QSEAT_ETAB'],
   MAX_RETRIES: process.env.NODE_ENV === 'production' ? 5 : 3,
   SYNC_INTERVAL: 5 * 60 * 1000, // 5 minutes
-  LOOKBACK_BUFFER: 10 * 60, // 10 minutes in seconds — always look back at least this far
+  //LOOKBACK_BUFFER: 10 * 60, // 10 minutes in seconds — always look back at least this far
+  LOOKBACK_BUFFER: 6 * 60 * 60,
   ERROR_CODES: {
     INVALID_ENDPOINT: 'INVALID_ENDPOINT',
     API_ERROR: 'API_ERROR',
