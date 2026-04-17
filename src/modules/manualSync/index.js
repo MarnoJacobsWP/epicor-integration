@@ -16,7 +16,6 @@ import fp from 'fastify-plugin';
 
 // ─── CONFIGURE THESE ───────────────────────────────────────────
 const ORDER_NUMS = [
-  204751, 204735, 204737, 204723, 204720, 204726, 204719, 204754
 ];
 
 const QUOTE_NUMS = [
@@ -25,6 +24,7 @@ const QUOTE_NUMS = [
 
 // Customer IDs (CustID) or Customer Numbers (CustNum) to target
 const CUSTOMER_IDS = [
+  3918
 ];
 // ───────────────────────────────────────────────────────────────
 
