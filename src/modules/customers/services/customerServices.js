@@ -32,39 +32,78 @@ function transformEpicorToHubSpot(epicorCustomer) {
   return result;
 }
 
+function normalizeOptionKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function buildOptionResolverFromDetailed(detailedOptions) {
+  const lookup = new Map();
+  for (const option of detailedOptions || []) {
+    const value = String(option?.value || '').trim();
+    const label = String(option?.label || '').trim();
+    if (!value) continue;
+    lookup.set(normalizeOptionKey(value), value);
+    if (label) lookup.set(normalizeOptionKey(label), value);
+  }
+  return lookup;
+}
+
 async function customerService(fastify, _) {
   const { ENDPOINTS, BATCH_SIZES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const BATCH_SIZE = BATCH_SIZES.CUSTOMERS || 100;
   const UNIQUE_PROPERTY = 'customer_id';
   const UNKNOWN_OPTION = 'Unknown Option';
 
-  async function getValidOptions(propertyName) {
+  async function getOptionResolver(propertyName) {
     try {
+      if (typeof fastify.hubspotAdapter.getPropertyOptionsDetailed === 'function') {
+        const options = await fastify.backoff(() =>
+          fastify.hubspotAdapter.getPropertyOptionsDetailed('companies', propertyName)
+        );
+        return buildOptionResolverFromDetailed(options);
+      }
+
       const options = await fastify.backoff(() =>
         fastify.hubspotAdapter.getPropertyOptions('companies', propertyName)
       );
-      return new Set(options || []);
+
+      const lookup = new Map();
+      for (const option of options || []) {
+        const value = String(option || '').trim();
+        if (value) lookup.set(normalizeOptionKey(value), value);
+      }
+      return lookup;
     } catch (error) {
       fastify.log.warn(`Failed loading HubSpot options for ${propertyName}: ${error.message}`);
-      return new Set();
+      return new Map();
     }
   }
 
   async function getSalesRepOptionSets() {
     const [salesrep, salesrepa] = await Promise.all([
-      getValidOptions('salesrep'),
-      getValidOptions('salesrepa_name'),
+      getOptionResolver('salesrep'),
+      getOptionResolver('salesrepa_name'),
     ]);
 
-    salesrep.add(UNKNOWN_OPTION);
-    salesrepa.add(UNKNOWN_OPTION);
+    salesrep.set(normalizeOptionKey(UNKNOWN_OPTION), UNKNOWN_OPTION);
+    salesrepa.set(normalizeOptionKey(UNKNOWN_OPTION), UNKNOWN_OPTION);
     return { salesrep, salesrepa };
   }
 
-  function normalizeSalesRepValue(value, optionsSet) {
+  function normalizeSalesRepValue(value, optionResolver) {
     const clean = String(value || '').trim();
-    if (!clean) return UNKNOWN_OPTION;
-    return optionsSet.has(clean) ? clean : UNKNOWN_OPTION;
+    if (!clean) {
+      return optionResolver.get(normalizeOptionKey(UNKNOWN_OPTION)) || UNKNOWN_OPTION;
+    }
+
+    // If option metadata cannot be loaded, preserve Epicor value instead of forcing Unknown Option.
+    if (!optionResolver || optionResolver.size === 0) {
+      return clean;
+    }
+
+    return optionResolver.get(normalizeOptionKey(clean))
+      || optionResolver.get(normalizeOptionKey(UNKNOWN_OPTION))
+      || UNKNOWN_OPTION;
   }
 
   async function associateContactsToCompany(companyId, custNum) {

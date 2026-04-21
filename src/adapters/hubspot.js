@@ -216,6 +216,36 @@ class HubspotAdapter {
     return options;
   }
 
+  async getPropertyOptionsDetailed(objectType, propertyName) {
+    if (!isNonEmptyString(objectType) || !isNonEmptyString(propertyName)) {
+      throw new Error('getPropertyOptionsDetailed requires objectType and propertyName');
+    }
+
+    const cacheKey = `${objectType}:${propertyName}:detailed`;
+    const cached = this.propertyOptionsCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.fetchedAt < 5 * 60 * 1000) {
+      return cached.options;
+    }
+
+    const response = await this._makeRequest(
+      'GET',
+      `/crm/v3/properties/${objectType}/${propertyName}`,
+    );
+
+    const options = Array.isArray(response?.data?.options)
+      ? response.data.options
+        .map((option) => ({
+          value: isNonEmptyString(option?.value) ? option.value : null,
+          label: isNonEmptyString(option?.label) ? option.label : null,
+        }))
+        .filter((option) => option.value)
+      : [];
+
+    this.propertyOptionsCache.set(cacheKey, { fetchedAt: now, options });
+    return options;
+  }
+
   async batchUpsertCompanies(batchData, idProperty = 'customer_id') {
     if (!Array.isArray(batchData)) {
       throw new TypeError('batchUpsertCompanies requires an array of records');

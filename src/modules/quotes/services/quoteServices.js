@@ -81,28 +81,67 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
+function normalizeOptionKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function buildOptionResolverFromDetailed(detailedOptions) {
+  const lookup = new Map();
+  for (const option of detailedOptions || []) {
+    const value = String(option?.value || '').trim();
+    const label = String(option?.label || '').trim();
+    if (!value) continue;
+    lookup.set(normalizeOptionKey(value), value);
+    if (label) lookup.set(normalizeOptionKey(label), value);
+  }
+  return lookup;
+}
+
 async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const UNKNOWN_OPTION = 'Unknown Option';
 
   async function getSalesRepOptions() {
     try {
+      if (typeof fastify.hubspotAdapter.getPropertyOptionsDetailed === 'function') {
+        const options = await fastify.backoff(() =>
+          fastify.hubspotAdapter.getPropertyOptionsDetailed('deals', 'salesrep_name')
+        );
+        const resolver = buildOptionResolverFromDetailed(options);
+        resolver.set(normalizeOptionKey(UNKNOWN_OPTION), UNKNOWN_OPTION);
+        return resolver;
+      }
+
       const options = await fastify.backoff(() =>
         fastify.hubspotAdapter.getPropertyOptions('deals', 'salesrep_name')
       );
-      const set = new Set(options || []);
-      set.add(UNKNOWN_OPTION);
-      return set;
+      const resolver = new Map();
+      for (const option of options || []) {
+        const value = String(option || '').trim();
+        if (value) resolver.set(normalizeOptionKey(value), value);
+      }
+      resolver.set(normalizeOptionKey(UNKNOWN_OPTION), UNKNOWN_OPTION);
+      return resolver;
     } catch (error) {
       fastify.log.warn(`Failed loading HubSpot options for salesrep_name: ${error.message}`);
-      return new Set([UNKNOWN_OPTION]);
+      return new Map([[normalizeOptionKey(UNKNOWN_OPTION), UNKNOWN_OPTION]]);
     }
   }
 
-  function normalizeSalesRepValue(value, optionsSet) {
+  function normalizeSalesRepValue(value, optionResolver) {
     const clean = String(value || '').trim();
-    if (!clean) return UNKNOWN_OPTION;
-    return optionsSet.has(clean) ? clean : UNKNOWN_OPTION;
+    if (!clean) {
+      return optionResolver.get(normalizeOptionKey(UNKNOWN_OPTION)) || UNKNOWN_OPTION;
+    }
+
+    // If option metadata cannot be loaded, preserve Epicor value instead of forcing Unknown Option.
+    if (!optionResolver || optionResolver.size === 0) {
+      return clean;
+    }
+
+    return optionResolver.get(normalizeOptionKey(clean))
+      || optionResolver.get(normalizeOptionKey(UNKNOWN_OPTION))
+      || UNKNOWN_OPTION;
   }
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
