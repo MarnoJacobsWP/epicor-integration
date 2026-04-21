@@ -24,7 +24,7 @@ const QUOTE_NUMS = [
 
 // Customer IDs (CustID) or Customer Numbers (CustNum) to target
 const CUSTOMER_IDS = [
-  3918
+  '0002',
 ];
 // ───────────────────────────────────────────────────────────────
 
