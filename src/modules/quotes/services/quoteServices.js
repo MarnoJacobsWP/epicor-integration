@@ -182,6 +182,31 @@ async function quoteService(fastify, _) {
     }
   }
 
+  async function ensureQuotePdfOnDeal(quoteNum, dealId, dealstage) {
+    if (dealstage !== HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} stage=${dealstage} — not QUOTE_CREATED, skipping PDF check`);
+      return;
+    }
+
+    let existing;
+    try {
+      const deal = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getDealById({ dealId, properties: ['quote_pdf'] })
+      );
+      existing = deal?.properties?.quote_pdf;
+    } catch (error) {
+      fastify.log.warn(`Quote ${quoteNum}: Could not read quote_pdf on deal ${dealId}: ${error.message}. Will attempt PDF generation anyway.`);
+    }
+
+    if (existing && String(existing).trim() !== '') {
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} already has quote_pdf=${existing} — skipping PDF generation`);
+      return;
+    }
+
+    fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} is in QUOTE_CREATED stage with no quote_pdf — triggering PDF generation`);
+    await generateAndUploadQuotePdf(quoteNum, dealId);
+  }
+
   async function generateAndUploadQuotePdf(quoteNum, dealId) {
     const ctx = `Quote ${quoteNum} (deal ${dealId}) PDF`;
     if (quoteNum === undefined || quoteNum === null || quoteNum === '' || !dealId) {
@@ -466,12 +491,7 @@ async function quoteService(fastify, _) {
 
             await syncQuoteLineItems(quoteNum, newDealId, { skipOrderCheck: true });
             await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, newDealId);
-            if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
-              fastify.log.info(`Quote ${quoteNum}: New deal ${newDealId} (recreated) is in QUOTE_CREATED stage — triggering PDF generation`);
-              await generateAndUploadQuotePdf(quoteNum, newDealId);
-            } else {
-              fastify.log.info(`Quote ${quoteNum}: New deal ${newDealId} (recreated) stage=${props.dealstage} — skipping PDF generation`);
-            }
+            await ensureQuotePdfOnDeal(quoteNum, newDealId, props.dealstage);
 
             results.created++;
             continue;
@@ -487,6 +507,7 @@ async function quoteService(fastify, _) {
 
           await syncQuoteLineItems(quoteNum, dealId);
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
+          await ensureQuotePdfOnDeal(quoteNum, dealId, props.dealstage);
 
           results.updated++;
         } else {
@@ -499,12 +520,7 @@ async function quoteService(fastify, _) {
 
           await syncQuoteLineItems(quoteNum, dealId, { skipOrderCheck: true });
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
-          if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
-            fastify.log.info(`Quote ${quoteNum}: New deal ${dealId} is in QUOTE_CREATED stage — triggering PDF generation`);
-            await generateAndUploadQuotePdf(quoteNum, dealId);
-          } else {
-            fastify.log.info(`Quote ${quoteNum}: New deal ${dealId} stage=${props.dealstage} — skipping PDF generation`);
-          }
+          await ensureQuotePdfOnDeal(quoteNum, dealId, props.dealstage);
 
           results.created++;
         }
