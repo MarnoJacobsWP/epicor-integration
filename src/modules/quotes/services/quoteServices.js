@@ -182,6 +182,95 @@ async function quoteService(fastify, _) {
     }
   }
 
+  async function generateAndUploadQuotePdf(quoteNum, dealId) {
+    const ctx = `Quote ${quoteNum} (deal ${dealId}) PDF`;
+    if (quoteNum === undefined || quoteNum === null || quoteNum === '' || !dealId) {
+      fastify.log.warn(`${ctx}: Skipped — missing quoteNum or dealId (quoteNum=${quoteNum}, dealId=${dealId})`);
+      return;
+    }
+    if (!fastify.config?.EPICOR_QUOTE_PDF_URL) {
+      fastify.log.warn(`${ctx}: Skipped — EPICOR_QUOTE_PDF_URL is not configured in .env`);
+      return;
+    }
+
+    const startedAt = Date.now();
+    let base64;
+    try {
+      fastify.log.info(`${ctx}: Step 1/3 — Calling Epicor GenerateQuotePDF endpoint...`);
+      base64 = await fastify.backoff(() => fastify.epicorAdapter.generateQuotePDF(quoteNum));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.error(
+        { err: error, status, responseBody: typeof body === 'string' ? body.slice(0, 500) : body },
+        `${ctx}: Step 1/3 FAILED — Epicor PDF generation: ${error.message}`,
+      );
+      return;
+    }
+
+    if (!base64) {
+      fastify.log.warn(`${ctx}: Step 1/3 returned empty PDFBase64, aborting upload`);
+      return;
+    }
+
+    let buffer;
+    try {
+      buffer = Buffer.from(base64, 'base64');
+    } catch (error) {
+      fastify.log.error(`${ctx}: Failed to decode base64 PDF: ${error.message}`);
+      return;
+    }
+    if (!buffer.length) {
+      fastify.log.warn(`${ctx}: Decoded PDF buffer is empty, aborting upload`);
+      return;
+    }
+    fastify.log.info(`${ctx}: Step 1/3 OK — base64 length=${base64.length}, decoded bytes=${buffer.length}`);
+
+    const fileName = `Quote-${quoteNum}-${Date.now()}.pdf`;
+    let uploaded;
+    try {
+      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${fastify.config.HUBSPOT_FILES_FOLDER_PATH || '/quote-pdfs'}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
+      uploaded = await fastify.backoff(() => fastify.hubspotAdapter.uploadFile({
+        buffer,
+        fileName,
+        contentType: 'application/pdf',
+      }));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.error(
+        { err: error, status, responseBody: body },
+        `${ctx}: Step 2/3 FAILED — HubSpot file upload: ${error.message}`,
+      );
+      return;
+    }
+
+    const fileId = uploaded?.id;
+    if (!fileId) {
+      fastify.log.error({ uploadResponse: uploaded }, `${ctx}: Step 2/3 returned no file ID — cannot set quote_pdf`);
+      return;
+    }
+    fastify.log.info(`${ctx}: Step 2/3 OK — uploaded file ID=${fileId}, url=${uploaded?.url || 'n/a'}`);
+
+    try {
+      fastify.log.info(`${ctx}: Step 3/3 — Setting quote_pdf=${fileId} on deal ${dealId}...`);
+      await fastify.backoff(() => fastify.hubspotAdapter.updateDeal({
+        dealId,
+        properties: { quote_pdf: String(fileId) },
+      }));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.error(
+        { err: error, status, responseBody: body, fileId },
+        `${ctx}: Step 3/3 FAILED — could not set quote_pdf on deal: ${error.message}`,
+      );
+      return;
+    }
+
+    fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);
+  }
+
   /** Properties needed for cross-source deduplication scanning. */
   const DEDUP_FETCH_PROPERTIES = ['name', 'price', 'amount', 'quotedtl_partnum'];
 
@@ -377,6 +466,12 @@ async function quoteService(fastify, _) {
 
             await syncQuoteLineItems(quoteNum, newDealId, { skipOrderCheck: true });
             await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, newDealId);
+            if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+              fastify.log.info(`Quote ${quoteNum}: New deal ${newDealId} (recreated) is in QUOTE_CREATED stage — triggering PDF generation`);
+              await generateAndUploadQuotePdf(quoteNum, newDealId);
+            } else {
+              fastify.log.info(`Quote ${quoteNum}: New deal ${newDealId} (recreated) stage=${props.dealstage} — skipping PDF generation`);
+            }
 
             results.created++;
             continue;
@@ -404,6 +499,12 @@ async function quoteService(fastify, _) {
 
           await syncQuoteLineItems(quoteNum, dealId, { skipOrderCheck: true });
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
+          if (props.dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
+            fastify.log.info(`Quote ${quoteNum}: New deal ${dealId} is in QUOTE_CREATED stage — triggering PDF generation`);
+            await generateAndUploadQuotePdf(quoteNum, dealId);
+          } else {
+            fastify.log.info(`Quote ${quoteNum}: New deal ${dealId} stage=${props.dealstage} — skipping PDF generation`);
+          }
 
           results.created++;
         }

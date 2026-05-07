@@ -98,6 +98,22 @@
     "HUBSPOT_MIN_REQUEST_INTERVAL_MS": {
       "type": "integer",
       "default": 125
+    },
+    "EPICOR_QUOTE_PDF_URL": {
+      "type": "string",
+      "default": ""
+    },
+    "EPICOR_COMPANY": {
+      "type": "string",
+      "default": ""
+    },
+    "HUBSPOT_FILES_FOLDER_PATH": {
+      "type": "string",
+      "default": "/quote-pdfs"
+    },
+    "HUBSPOT_FILES_ACCESS": {
+      "type": "string",
+      "default": "PRIVATE"
     }
   }
 }

@@ -92,6 +92,8 @@ class HubspotAdapter {
     this.maxRetries = constants?.MAX_RETRIES || 3;
     this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
     this.minRequestIntervalMs = Number(config?.HUBSPOT_MIN_REQUEST_INTERVAL_MS || 125);
+    this.filesFolderPath = config?.HUBSPOT_FILES_FOLDER_PATH || '/quote-pdfs';
+    this.filesAccess = config?.HUBSPOT_FILES_ACCESS || 'PRIVATE';
     this.requestQueue = null;
     this.nextRequestAt = 0;
     this.propertyOptionsCache = new Map();
@@ -836,6 +838,81 @@ class HubspotAdapter {
       'PUT',
       `/crm/v3/objects/${fromObjectType}/${fromObjectId}/associations/${toObjectType}/${toObjectId}/${associationCategory}`
     );
+  }
+
+  async uploadFile({ buffer, fileName, contentType = 'application/octet-stream', folderPath, access } = {}) {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+      throw new Error('uploadFile requires a non-empty Buffer');
+    }
+    if (!isNonEmptyString(fileName)) {
+      throw new Error('uploadFile requires a fileName');
+    }
+
+    const targetFolder = isNonEmptyString(folderPath) ? folderPath : this.filesFolderPath;
+    const targetAccess = isNonEmptyString(access) ? access : this.filesAccess;
+
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: contentType }), fileName);
+    form.append('folderPath', targetFolder);
+    form.append(
+      'options',
+      JSON.stringify({
+        access: targetAccess,
+        overwrite: false,
+        duplicateValidationStrategy: 'NONE',
+        duplicateValidationScope: 'ENTIRE_PORTAL',
+      }),
+    );
+
+    const config = {
+      method: 'POST',
+      url: `${this.baseURL}/files/v3/files`,
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+      data: form,
+      timeout: this.requestTimeout,
+      maxContentLength: 50 * 1024 * 1024,
+      maxBodyLength: 50 * 1024 * 1024,
+    };
+
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        const response = await this._scheduleRequest(() => this.client(config));
+        if (!response?.data) {
+          throw new Error('HubSpot file upload returned no data');
+        }
+        this.logger.info(
+          `HubSpot file upload OK: name=${fileName} bytes=${buffer.length} fileId=${response.data?.id || 'n/a'} url=${response.data?.url || 'n/a'}`,
+        );
+        return response.data;
+      } catch (error) {
+        const status = error?.response?.status;
+        const statusText = error?.response?.statusText || '';
+        const retryAfterHeader = error?.response?.headers?.['retry-after'];
+        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
+
+        if (!isRetryableStatus(status) || attempt >= this.maxRetries) {
+          const responseBody = safeStringify(error?.response?.data);
+          const { errorMessage } = extractHubspotErrorDetails(error?.response?.data);
+          const messageSuffix = errorMessage ? ` - ${errorMessage}` : '';
+          const message = `HubSpot file upload failed: POST /files/v3/files - ${status || 'unknown'} ${statusText}${messageSuffix}`;
+          this.logger.error({ status, statusText, responseBody, fileName }, message);
+          const wrappedError = new Error(message, { cause: error });
+          wrappedError.response = error?.response;
+          wrappedError.status = status;
+          throw wrappedError;
+        }
+
+        const delayMs = computeRetryDelay(attempt, retryAfterMs);
+        this.logger.warn(
+          `HubSpot file upload retry ${attempt} for ${fileName} in ${delayMs}ms (status ${status})`,
+        );
+        await sleep(delayMs);
+      }
+    }
+
+    throw new Error(`HubSpot file upload failed after ${this.maxRetries} retries.`);
   }
 }
 
