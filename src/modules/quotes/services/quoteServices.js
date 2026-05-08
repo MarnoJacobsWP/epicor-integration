@@ -199,15 +199,15 @@ async function quoteService(fastify, _) {
     }
 
     if (existing && String(existing).trim() !== '') {
-      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} already has quote_pdf=${existing} — skipping PDF generation`);
-      return;
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} already has quote_pdf=${existing} — refreshing PDF upload`);
+    } else {
+      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} is in QUOTE_CREATED stage with no quote_pdf — triggering PDF generation`);
     }
 
-    fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} is in QUOTE_CREATED stage with no quote_pdf — triggering PDF generation`);
-    await generateAndUploadQuotePdf(quoteNum, dealId);
+    await generateAndUploadQuotePdf(quoteNum, dealId, existing);
   }
 
-  async function generateAndUploadQuotePdf(quoteNum, dealId) {
+  async function generateAndUploadQuotePdf(quoteNum, dealId, previousFileId) {
     const ctx = `Quote ${quoteNum} (deal ${dealId}) PDF`;
     if (quoteNum === undefined || quoteNum === null || quoteNum === '' || !dealId) {
       fastify.log.warn(`${ctx}: Skipped — missing quoteNum or dealId (quoteNum=${quoteNum}, dealId=${dealId})`);
@@ -291,6 +291,21 @@ async function quoteService(fastify, _) {
         `${ctx}: Step 3/3 FAILED — could not set quote_pdf on deal: ${error.message}`,
       );
       return;
+    }
+
+    const previousId = previousFileId == null ? '' : String(previousFileId).trim();
+    if (previousId && previousId !== String(fileId)) {
+      try {
+        fastify.log.info(`${ctx}: Step 4/4 — Deleting previous HubSpot file ${previousId}...`);
+        await fastify.backoff(() => fastify.hubspotAdapter.deleteFile(previousId));
+      } catch (error) {
+        const status = error?.cause?.response?.status || error?.response?.status;
+        const body = error?.cause?.response?.data || error?.response?.data;
+        fastify.log.warn(
+          { err: error, status, responseBody: body, previousFileId: previousId, fileId },
+          `${ctx}: Step 4/4 FAILED — could not delete previous HubSpot file: ${error.message}`,
+        );
+      }
     }
 
     fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);

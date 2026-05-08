@@ -54,6 +54,11 @@ const safeStringify = (value, maxLength = 4000) => {
   }
 };
 
+const sanitizeConfiguredValue = (value) => {
+  if (!isNonEmptyString(value)) return '';
+  return String(value).replace(/\s+#.*$/, '').trim();
+};
+
 const extractHubspotErrorDetails = (responseData) => {
   if (!responseData || typeof responseData !== 'object') {
     return { errorMessage: undefined, errorDetails: undefined };
@@ -92,8 +97,8 @@ class HubspotAdapter {
     this.maxRetries = constants?.MAX_RETRIES || 3;
     this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
     this.minRequestIntervalMs = Number(config?.HUBSPOT_MIN_REQUEST_INTERVAL_MS || 125);
-    this.filesFolderPath = config?.HUBSPOT_FILES_FOLDER_PATH || '/quote-pdfs';
-    this.filesAccess = config?.HUBSPOT_FILES_ACCESS || 'PRIVATE';
+    this.filesFolderPath = sanitizeConfiguredValue(config?.HUBSPOT_FILES_FOLDER_PATH) || '/quote-pdfs';
+    this.filesAccess = sanitizeConfiguredValue(config?.HUBSPOT_FILES_ACCESS) || 'PRIVATE';
     this.requestQueue = null;
     this.nextRequestAt = 0;
     this.propertyOptionsCache = new Map();
@@ -913,6 +918,40 @@ class HubspotAdapter {
     }
 
     throw new Error(`HubSpot file upload failed after ${this.maxRetries} retries.`);
+  }
+
+  async deleteFile(fileId) {
+    if (!isNonEmptyString(fileId) && typeof fileId !== 'number') {
+      throw new Error('deleteFile requires a fileId');
+    }
+
+    const normalizedFileId = String(fileId).trim();
+    if (!normalizedFileId) {
+      throw new Error('deleteFile requires a non-empty fileId');
+    }
+
+    try {
+      await this._makeRequest('DELETE', `/files/v3/files/${normalizedFileId}`);
+      this.logger.info(`HubSpot file delete OK: fileId=${normalizedFileId}`);
+      return true;
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status === 404) {
+        this.logger.warn(`HubSpot file delete skipped: fileId=${normalizedFileId} was not found`);
+        return false;
+      }
+
+      const statusText = error?.response?.statusText || '';
+      const responseBody = safeStringify(error?.response?.data);
+      const { errorMessage } = extractHubspotErrorDetails(error?.response?.data);
+      const messageSuffix = errorMessage ? ` - ${errorMessage}` : '';
+      const message = `HubSpot file delete failed: DELETE /files/v3/files/${normalizedFileId} - ${status || 'unknown'} ${statusText}${messageSuffix}`;
+      this.logger.error({ status, statusText, responseBody, fileId: normalizedFileId }, message);
+      const wrappedError = new Error(message, { cause: error });
+      wrappedError.response = error?.response;
+      wrappedError.status = status;
+      throw wrappedError;
+    }
   }
 }
 
