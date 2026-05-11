@@ -16,6 +16,7 @@ export default fp(
       hubspotTokenConfigured: Boolean(fastify.config?.HUBSPOT_ACCESS_TOKEN),
       mongoConfigured: Boolean(fastify.config?.MONGO_URI),
       epicorQuotePdfUrlConfigured: Boolean(fastify.config?.EPICOR_QUOTE_PDF_URL),
+      epicorSalesOrderPdfUrlConfigured: Boolean(fastify.config?.EPICOR_SALES_ORDER_PDF_URL),
       epicorCompanyConfigured: Boolean(fastify.config?.EPICOR_COMPANY),
       hubspotFilesFolderPathConfigured: Boolean(fastify.config?.HUBSPOT_FILES_FOLDER_PATH),
       hubspotFilesAccessConfigured: Boolean(fastify.config?.HUBSPOT_FILES_ACCESS),

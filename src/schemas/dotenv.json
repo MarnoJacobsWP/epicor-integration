@@ -103,6 +103,10 @@
       "type": "string",
       "default": ""
     },
+    "EPICOR_SALES_ORDER_PDF_URL": {
+      "type": "string",
+      "default": ""
+    },
     "EPICOR_COMPANY": {
       "type": "string",
       "default": ""

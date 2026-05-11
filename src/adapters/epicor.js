@@ -251,87 +251,133 @@ export default fp(
         };
       }
 
-      async generateQuotePDF(quoteNum) {
-        if (quoteNum === undefined || quoteNum === null || quoteNum === '') {
-          throw new Error('generateQuotePDF requires a QuoteNum');
-        }
-
-        const url = this.config.EPICOR_QUOTE_PDF_URL;
-        if (!url) {
-          throw new Error('EPICOR_QUOTE_PDF_URL is not configured');
-        }
-
+      _getPdfHeaders() {
         const company = this.config.EPICOR_COMPANY;
         const headers = {
           ...this.headers,
           'Content-Type': 'application/json',
         };
+
         if (company) {
           headers['X-epicor-company'] = company;
         } else {
-          fastify.log.warn(`Epicor PDF: EPICOR_COMPANY env var is empty — request will be sent without X-epicor-company header`);
+          fastify.log.warn('Epicor PDF: EPICOR_COMPANY env var is empty — request will be sent without X-epicor-company header');
         }
 
+        return { company, headers };
+      }
+
+      _getPdfBodyPreview(responseBody, maxLength = 500) {
+        if (typeof responseBody === 'string') {
+          return responseBody.slice(0, maxLength);
+        }
+
+        if (!responseBody) {
+          return '';
+        }
+
+        return JSON.stringify(responseBody).slice(0, maxLength);
+      }
+
+      _getPdfRetryDelay(error, attempt, baseDelayMs) {
+        const retryAfterHeader = error?.response?.headers?.['retry-after'];
+        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
+        return Math.min(
+          retryAfterMs || baseDelayMs * Math.pow(2, attempt - 1),
+          30000,
+        );
+      }
+
+      _buildPdfFailureMessage({ attempt, label, value, status, statusText, bodyPreview }) {
+        const bodySuffix = bodyPreview ? ` body=${bodyPreview}` : '';
+        return `Epicor PDF request failed after ${attempt} attempt(s) for ${label}=${value}: ${status || 'unknown'} ${statusText}${bodySuffix}`;
+      }
+
+      async _requestPdf({ url, payload, headers, label, value }) {
+        const startTime = Date.now();
+        const response = await this.client.post(url, payload, {
+          headers,
+          auth: this.credentials,
+          timeout: this.REQUEST_TIMEOUT,
+          maxContentLength: 50 * 1024 * 1024,
+          maxBodyLength: 50 * 1024 * 1024,
+        });
+
+        const duration = Date.now() - startTime;
+        const base64 = response?.data?.PDFBase64 || response?.data?.pdfBase64;
+        const responseKeys = response?.data && typeof response.data === 'object' ? Object.keys(response.data) : [];
+        fastify.log.info(
+          `Epicor PDF: ${label}=${value} response status=${response.status} duration=${duration}ms keys=[${responseKeys.join(',')}] base64Length=${base64?.length || 0}`,
+        );
+
+        if (!base64) {
+          const preview = this._getPdfBodyPreview(response?.data, 300);
+          throw new Error(`Epicor PDF response missing PDFBase64. Body preview: ${preview}`);
+        }
+
+        return base64;
+      }
+
+      async generatePdf({ value, valueField, urlConfigKey, label }) {
+        if (value === undefined || value === null || value === '') {
+          throw new Error(`generatePdf requires a ${valueField}`);
+        }
+
+        const url = this.config[urlConfigKey];
+        if (!url) {
+          throw new Error(`${urlConfigKey} is not configured`);
+        }
+
+        const { company, headers } = this._getPdfHeaders();
         const maxRetries = this.constants?.MAX_RETRIES || 3;
         const baseDelayMs = 1000;
-        const payload = { QuoteNum: Number(quoteNum) };
+        const payload = { [valueField]: Number(value) };
 
         fastify.log.info(`Epicor PDF: POST ${url} payload=${JSON.stringify(payload)} (company=${company || 'none'})`);
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           try {
-            const startTime = Date.now();
-            const response = await this.client.post(url, payload, {
-              headers,
-              auth: this.credentials,
-              timeout: this.REQUEST_TIMEOUT,
-              maxContentLength: 50 * 1024 * 1024,
-              maxBodyLength: 50 * 1024 * 1024,
-            });
-
-            const duration = Date.now() - startTime;
-            const base64 = response?.data?.PDFBase64 || response?.data?.pdfBase64;
-            const responseKeys = response?.data && typeof response.data === 'object' ? Object.keys(response.data) : [];
-            fastify.log.info(
-              `Epicor PDF: QuoteNum=${quoteNum} response status=${response.status} duration=${duration}ms keys=[${responseKeys.join(',')}] base64Length=${base64?.length || 0}`,
-            );
-
-            if (!base64) {
-              const preview = typeof response?.data === 'string'
-                ? response.data.slice(0, 300)
-                : JSON.stringify(response?.data || {}).slice(0, 300);
-              throw new Error(`Epicor PDF response missing PDFBase64. Body preview: ${preview}`);
-            }
-            return base64;
+            return await this._requestPdf({ url, payload, headers, label, value });
           } catch (error) {
             const status = error?.response?.status;
             const statusText = error?.response?.statusText || '';
             const responseBody = error?.response?.data;
-            const bodyPreview = typeof responseBody === 'string'
-              ? responseBody.slice(0, 500)
-              : responseBody ? JSON.stringify(responseBody).slice(0, 500) : '';
+            const bodyPreview = this._getPdfBodyPreview(responseBody);
             const isRetryable = status === 429 || (status >= 500 && status <= 599);
 
             if (!isRetryable || attempt >= maxRetries) {
-              const message = `Epicor PDF request failed after ${attempt} attempt(s) for QuoteNum=${quoteNum}: ${status || 'unknown'} ${statusText} ${bodyPreview ? `body=${bodyPreview}` : ''}`;
-              fastify.log.error({ status, statusText, bodyPreview, quoteNum }, message);
+              const message = this._buildPdfFailureMessage({ attempt, label, value, status, statusText, bodyPreview });
+              fastify.log.error({ status, statusText, bodyPreview, [label]: value }, message);
               throw new Error(message, { cause: error });
             }
 
-            const retryAfterHeader = error?.response?.headers?.['retry-after'];
-            const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
-            const waitTime = Math.min(
-              retryAfterMs || baseDelayMs * Math.pow(2, attempt - 1),
-              30000,
-            );
+            const waitTime = this._getPdfRetryDelay(error, attempt, baseDelayMs);
             fastify.log.warn(
-              `Epicor PDF attempt ${attempt} for QuoteNum=${quoteNum} failed: ${status || 'unknown'} ${statusText} ${bodyPreview}. Retrying in ${waitTime}ms`,
+              `Epicor PDF attempt ${attempt} for ${label}=${value} failed: ${status || 'unknown'} ${statusText} ${bodyPreview}. Retrying in ${waitTime}ms`,
             );
             await new Promise((res) => setTimeout(res, waitTime));
           }
         }
 
-        throw new Error(`Epicor PDF request failed after ${maxRetries} retries for QuoteNum=${quoteNum}.`);
+        throw new Error(`Epicor PDF request failed after ${maxRetries} retries for ${label}=${value}.`);
+      }
+
+      async generateQuotePDF(quoteNum) {
+        return this.generatePdf({
+          value: quoteNum,
+          valueField: 'QuoteNum',
+          urlConfigKey: 'EPICOR_QUOTE_PDF_URL',
+          label: 'QuoteNum',
+        });
+      }
+
+      async generateSalesOrderPDF(orderNum) {
+        return this.generatePdf({
+          value: orderNum,
+          valueField: 'OrderNum',
+          urlConfigKey: 'EPICOR_SALES_ORDER_PDF_URL',
+          label: 'OrderNum',
+        });
       }
     }
 

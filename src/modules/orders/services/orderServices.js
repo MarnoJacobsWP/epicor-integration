@@ -81,6 +81,7 @@ function extractHubspotErrorContext(error) {
 
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
+  const HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH = '/Sales Orders';
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
@@ -157,6 +158,142 @@ async function orderService(fastify, _) {
       }
     } catch (error) {
       fastify.log.warn(`Order ${orderNum}: Failed to check matching quote ${quoteNum}: ${error.message}`);
+    }
+  }
+
+  async function ensureSalesOrderPdfOnDeal(orderNum, dealId, dealstage) {
+    if (dealstage !== HUBSPOT_DEAL_STAGES.CLOSED_WON) {
+      fastify.log.info(`Order ${orderNum}: Deal ${dealId} stage=${dealstage} — not CLOSED_WON, skipping sales order PDF check`);
+      return;
+    }
+
+    let existing;
+    try {
+      const deal = await fastify.backoff(() =>
+        fastify.hubspotAdapter.getDealById({ dealId, properties: ['sales_order_pdf'] })
+      );
+      existing = deal?.properties?.sales_order_pdf;
+    } catch (error) {
+      fastify.log.warn(`Order ${orderNum}: Could not read sales_order_pdf on deal ${dealId}: ${error.message}. Will attempt PDF generation anyway.`);
+    }
+
+    if (existing && String(existing).trim() !== '') {
+      fastify.log.info(`Order ${orderNum}: Deal ${dealId} already has sales_order_pdf=${existing} — refreshing PDF upload`);
+    } else {
+      fastify.log.info(`Order ${orderNum}: Deal ${dealId} is CLOSED_WON with no sales_order_pdf — triggering PDF generation`);
+    }
+
+    await generateAndUploadSalesOrderPdf(orderNum, dealId, existing);
+  }
+
+  async function generateAndUploadSalesOrderPdf(orderNum, dealId, previousFileId) {
+    const ctx = `Order ${orderNum} (deal ${dealId}) PDF`;
+    if (orderNum === undefined || orderNum === null || orderNum === '' || !dealId) {
+      fastify.log.warn(`${ctx}: Skipped — missing orderNum or dealId (orderNum=${orderNum}, dealId=${dealId})`);
+      return;
+    }
+    if (!fastify.config?.EPICOR_SALES_ORDER_PDF_URL) {
+      fastify.log.warn(`${ctx}: Skipped — EPICOR_SALES_ORDER_PDF_URL is not configured in .env`);
+      return;
+    }
+
+    const startedAt = Date.now();
+    let base64;
+    try {
+      fastify.log.info(`${ctx}: Step 1/3 — Calling Epicor GenerateSalesOrderPDF endpoint...`);
+      base64 = await fastify.backoff(() => fastify.epicorAdapter.generateSalesOrderPDF(orderNum));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.error(
+        { err: error, status, responseBody: typeof body === 'string' ? body.slice(0, 500) : body },
+        `${ctx}: Step 1/3 FAILED — Epicor PDF generation: ${error.message}`,
+      );
+      return;
+    }
+
+    if (!base64) {
+      fastify.log.warn(`${ctx}: Step 1/3 returned empty PDFBase64, aborting upload`);
+      return;
+    }
+
+    let buffer;
+    try {
+      buffer = Buffer.from(base64, 'base64');
+    } catch (error) {
+      fastify.log.error(`${ctx}: Failed to decode base64 PDF: ${error.message}`);
+      return;
+    }
+    if (!buffer.length) {
+      fastify.log.warn(`${ctx}: Decoded PDF buffer is empty, aborting upload`);
+      return;
+    }
+    fastify.log.info(`${ctx}: Step 1/3 OK — base64 length=${base64.length}, decoded bytes=${buffer.length}`);
+
+    const fileName = `Sales-Order-${orderNum}-${Date.now()}.pdf`;
+    let uploaded;
+    try {
+      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
+      uploaded = await fastify.backoff(() => fastify.hubspotAdapter.uploadFile({
+        buffer,
+        fileName,
+        contentType: 'application/pdf',
+        folderPath: HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH,
+      }));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.error(
+        { err: error, status, responseBody: body },
+        `${ctx}: Step 2/3 FAILED — HubSpot file upload: ${error.message}`,
+      );
+      return;
+    }
+
+    const fileId = uploaded?.id;
+    if (!fileId) {
+      fastify.log.error({ uploadResponse: uploaded }, `${ctx}: Step 2/3 returned no file ID — cannot set sales_order_pdf`);
+      return;
+    }
+    fastify.log.info(`${ctx}: Step 2/3 OK — uploaded file ID=${fileId}, url=${uploaded?.url || 'n/a'}`);
+
+    try {
+      fastify.log.info(`${ctx}: Step 3/3 — Setting sales_order_pdf=${fileId} on deal ${dealId}...`);
+      await fastify.backoff(() => fastify.hubspotAdapter.updateDeal({
+        dealId,
+        properties: { sales_order_pdf: String(fileId) },
+      }));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.error(
+        { err: error, status, responseBody: body, fileId },
+        `${ctx}: Step 3/3 FAILED — could not set sales_order_pdf on deal: ${error.message}`,
+      );
+      return;
+    }
+
+    await deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId });
+
+    fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);
+  }
+
+  async function deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId }) {
+    const previousId = previousFileId == null ? '' : String(previousFileId).trim();
+    if (!previousId || previousId === String(fileId)) {
+      return;
+    }
+
+    try {
+      fastify.log.info(`${ctx}: Step 4/4 — Deleting previous HubSpot file ${previousId}...`);
+      await fastify.backoff(() => fastify.hubspotAdapter.deleteFile(previousId));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.warn(
+        { err: error, status, responseBody: body, previousFileId: previousId, fileId },
+        `${ctx}: Step 4/4 FAILED — could not delete previous HubSpot file: ${error.message}`,
+      );
     }
   }
 
@@ -338,6 +475,7 @@ async function orderService(fastify, _) {
             await syncOrderLineItems(orderNum, quoteNum, newDealId);
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
             await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
+            await ensureSalesOrderPdfOnDeal(orderNum, newDealId, props.dealstage);
 
             results.created++;
             continue;
@@ -348,6 +486,7 @@ async function orderService(fastify, _) {
           await syncOrderLineItems(orderNum, quoteNum, dealId);
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
+          await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage);
 
           results.updated++;
         } else {
@@ -361,6 +500,7 @@ async function orderService(fastify, _) {
           await syncOrderLineItems(orderNum, quoteNum, dealId);
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
+          await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage);
 
           results.created++;
         }
