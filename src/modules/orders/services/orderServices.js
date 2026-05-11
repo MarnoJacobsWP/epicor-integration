@@ -101,6 +101,9 @@ async function orderService(fastify, _) {
   async function updateMatchingQuote(quoteNum, orderNum, quoteDealId) {
     try {
       const properties = {};
+      if (orderNum != null && String(orderNum).trim() !== '') {
+        properties.orderhed_ordernum = String(orderNum);
+      }
       if (HUBSPOT_PIPELINES.QUOTES) properties.pipeline = HUBSPOT_PIPELINES.QUOTES;
       if (HUBSPOT_DEAL_STAGES.CLOSED_WON) properties.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
 
@@ -113,7 +116,7 @@ async function orderService(fastify, _) {
             properties
           })
         );
-        fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won (deal ${quoteDealId})`);
+        fastify.log.info(`Updated matching quote ${quoteNum} to Closed Won with orderhed_ordernum=${properties.orderhed_ordernum || 'n/a'} (deal ${quoteDealId})`);
       }
       
       // Sync all order line items (purge QuoteProdMix, sync OrderProdMix + QSeatEtab)
