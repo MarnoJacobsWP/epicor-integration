@@ -149,16 +149,22 @@ async function orderService(fastify, _) {
     }
   }
 
-  async function checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal) {
+  async function checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, currentDealId) {
     if (!quoteNum || usedQuoteDeal) return;
 
     try {
       const quoteSearchData = await fastify.backoff(() =>
         fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
       );
-      if (quoteSearchData.results?.[0]?.id) {
-        await updateMatchingQuote(quoteNum, orderNum, quoteSearchData.results[0].id);
+      const quoteDealId = quoteSearchData.results?.[0]?.id;
+      if (!quoteDealId) return;
+
+      if (currentDealId && String(currentDealId) === String(quoteDealId)) {
+        fastify.log.debug(`Order ${orderNum}: Quote ${quoteNum} already resolved to current deal ${currentDealId}, skipping duplicate quote update`);
+        return;
       }
+
+      await updateMatchingQuote(quoteNum, orderNum, quoteDealId);
     } catch (error) {
       fastify.log.warn(`Order ${orderNum}: Failed to check matching quote ${quoteNum}: ${error.message}`);
     }
@@ -477,7 +483,7 @@ async function orderService(fastify, _) {
 
             await syncOrderLineItems(orderNum, quoteNum, newDealId);
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
-            await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
+            await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, newDealId);
             await ensureSalesOrderPdfOnDeal(orderNum, newDealId, props.dealstage);
 
             results.created++;
@@ -488,7 +494,7 @@ async function orderService(fastify, _) {
 
           await syncOrderLineItems(orderNum, quoteNum, dealId);
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
-          await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
+          await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, dealId);
           await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage);
 
           results.updated++;
@@ -502,7 +508,7 @@ async function orderService(fastify, _) {
 
           await syncOrderLineItems(orderNum, quoteNum, dealId);
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
-          await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal);
+          await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, dealId);
           await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage);
 
           results.created++;
