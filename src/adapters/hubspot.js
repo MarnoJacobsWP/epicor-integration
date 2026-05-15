@@ -97,7 +97,7 @@ class HubspotAdapter {
     this.maxRetries = constants?.MAX_RETRIES || 3;
     this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
     this.minRequestIntervalMs = Number(config?.HUBSPOT_MIN_REQUEST_INTERVAL_MS || 125);
-    this.filesFolderPath = sanitizeConfiguredValue(config?.HUBSPOT_FILES_FOLDER_PATH) || '/quote-pdfs';
+    this.filesFolderPath = sanitizeConfiguredValue(config?.HUBSPOT_FILES_FOLDER_PATH) || '/Quotes';
     this.filesAccess = sanitizeConfiguredValue(config?.HUBSPOT_FILES_ACCESS) || 'PRIVATE';
     this.requestQueue = null;
     this.nextRequestAt = 0;

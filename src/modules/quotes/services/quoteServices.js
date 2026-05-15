@@ -251,10 +251,10 @@ async function quoteService(fastify, _) {
     }
     fastify.log.info(`${ctx}: Step 1/3 OK — base64 length=${base64.length}, decoded bytes=${buffer.length}`);
 
-    const fileName = `Quote-${quoteNum}-${Date.now()}.pdf`;
+    const fileName = `Quote-${quoteNum}.pdf`;
     let uploaded;
     try {
-      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${fastify.config.HUBSPOT_FILES_FOLDER_PATH || '/quote-pdfs'}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
+      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${fastify.config.HUBSPOT_FILES_FOLDER_PATH || '/Quotes'}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
       uploaded = await fastify.backoff(() => fastify.hubspotAdapter.uploadFile({
         buffer,
         fileName,

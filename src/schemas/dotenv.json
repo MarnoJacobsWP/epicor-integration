@@ -113,7 +113,7 @@
     },
     "HUBSPOT_FILES_FOLDER_PATH": {
       "type": "string",
-      "default": "/quote-pdfs"
+      "default": "/Quotes"
     },
     "HUBSPOT_FILES_ACCESS": {
       "type": "string",

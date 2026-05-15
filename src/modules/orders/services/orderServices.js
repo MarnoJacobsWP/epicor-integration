@@ -239,7 +239,7 @@ async function orderService(fastify, _) {
     }
     fastify.log.info(`${ctx}: Step 1/3 OK — base64 length=${base64.length}, decoded bytes=${buffer.length}`);
 
-    const fileName = `Sales-Order-${orderNum}-${Date.now()}.pdf`;
+    const fileName = `Sales Order-${orderNum}.pdf`;
     let uploaded;
     try {
       fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
