@@ -2,6 +2,8 @@ import fp from 'fastify-plugin';
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_PROPERTY_LENGTH = 1000;
+const FILE_READY_MAX_ATTEMPTS = 6;
+const FILE_READY_BASE_DELAY_MS = 500;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -845,6 +847,164 @@ class HubspotAdapter {
     );
   }
 
+  async getFileById(fileId) {
+    if (!isNonEmptyString(fileId) && typeof fileId !== 'number') {
+      throw new Error('getFileById requires a fileId');
+    }
+
+    const normalizedFileId = String(fileId).trim();
+    if (!normalizedFileId) {
+      throw new Error('getFileById requires a non-empty fileId');
+    }
+
+    const response = await this._makeRequest('GET', `/files/v3/files/${normalizedFileId}`);
+    return response?.data;
+  }
+
+  _isFileReady(fileDetails) {
+    if (!fileDetails || typeof fileDetails !== 'object') {
+      return false;
+    }
+
+    const isArchived = Boolean(fileDetails.archived);
+    const processingStatus = String(
+      fileDetails.processingStatus || fileDetails.fileProcessingStatus || fileDetails.status || ''
+    ).toUpperCase();
+    const readinessHint = String(
+      fileDetails.availability || fileDetails.state || fileDetails.fileStatus || ''
+    ).toUpperCase();
+
+    if (isArchived) {
+      return false;
+    }
+
+    if (processingStatus && ['PENDING', 'PROCESSING', 'IN_PROGRESS', 'QUEUED'].includes(processingStatus)) {
+      return false;
+    }
+
+    if (readinessHint && ['PENDING', 'PROCESSING', 'IN_PROGRESS', 'QUEUED'].includes(readinessHint)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  async waitForFileReady(fileId, { fileName, maxAttempts = FILE_READY_MAX_ATTEMPTS } = {}) {
+    const normalizedFileId = String(fileId).trim();
+    let lastDetails;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      lastDetails = await this.getFileById(normalizedFileId);
+      if (this._isFileReady(lastDetails)) {
+        if (attempt > 1) {
+          this.logger.info(
+            `HubSpot file ready after ${attempt} checks: fileId=${normalizedFileId} name=${fileName || lastDetails?.name || 'n/a'}`,
+          );
+        }
+        return lastDetails;
+      }
+
+      if (attempt >= maxAttempts) {
+        break;
+      }
+
+      const delayMs = computeRetryDelay(attempt, undefined, FILE_READY_BASE_DELAY_MS, 5000);
+      this.logger.warn(
+        `HubSpot file not ready yet: fileId=${normalizedFileId} name=${fileName || lastDetails?.name || 'n/a'} attempt=${attempt}/${maxAttempts}; retrying in ${delayMs}ms`,
+      );
+      await sleep(delayMs);
+    }
+
+    this.logger.warn(
+      {
+        fileId: normalizedFileId,
+        fileName,
+        processingStatus: lastDetails?.processingStatus || lastDetails?.fileProcessingStatus || lastDetails?.status,
+        availability: lastDetails?.availability || lastDetails?.state || lastDetails?.fileStatus,
+      },
+      `HubSpot file may still be processing after ${maxAttempts} checks: fileId=${normalizedFileId}`,
+    );
+
+    return lastDetails;
+  }
+
+  async renameFile(fileId, desiredName) {
+    if ((!isNonEmptyString(fileId) && typeof fileId !== 'number') || !isNonEmptyString(desiredName)) {
+      throw new Error('renameFile requires a fileId and desiredName');
+    }
+
+    const normalizedFileId = String(fileId).trim();
+    const normalizedDesiredName = String(desiredName).trim();
+    const desiredStem = normalizedDesiredName.replace(/\.[^.]+$/, '');
+
+    const attempts = [
+      { name: normalizedDesiredName },
+      { fileName: normalizedDesiredName },
+      { name: desiredStem },
+    ];
+
+    let lastError;
+    for (const payload of attempts) {
+      try {
+        await this._makeRequest('PATCH', `/files/v3/files/${normalizedFileId}`, payload);
+        return await this.getFileById(normalizedFileId);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(
+      `HubSpot file rename failed for fileId=${normalizedFileId} desiredName=${normalizedDesiredName}: ${lastError?.message || 'unknown error'}`,
+      { cause: lastError },
+    );
+  }
+
+  _buildFileUploadConfig({ form }) {
+    return {
+      method: 'POST',
+      url: `${this.baseURL}/files/v3/files`,
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+      data: form,
+      timeout: this.requestTimeout,
+      maxContentLength: 50 * 1024 * 1024,
+      maxBodyLength: 50 * 1024 * 1024,
+    };
+  }
+
+  async _uploadFileOnce(config, fileName, bufferLength) {
+    const response = await this._scheduleRequest(() => this.client(config));
+    if (!response?.data) {
+      throw new Error('HubSpot file upload returned no data');
+    }
+
+    const uploadedFileId = response.data?.id;
+    const readyFile = uploadedFileId
+      ? await this.waitForFileReady(uploadedFileId, { fileName })
+      : null;
+
+    this.logger.info(
+      `HubSpot file upload OK: name=${fileName} bytes=${bufferLength} fileId=${response.data?.id || 'n/a'} url=${response.data?.url || 'n/a'}`,
+    );
+
+    return readyFile || response.data;
+  }
+
+  _buildFileUploadError(error, fileName) {
+    const status = error?.response?.status;
+    const statusText = error?.response?.statusText || '';
+    const responseBody = safeStringify(error?.response?.data);
+    const { errorMessage } = extractHubspotErrorDetails(error?.response?.data);
+    const messageSuffix = errorMessage ? ` - ${errorMessage}` : '';
+    const message = `HubSpot file upload failed: POST /files/v3/files - ${status || 'unknown'} ${statusText}${messageSuffix}`;
+    this.logger.error({ status, statusText, responseBody, fileName }, message);
+    const wrappedError = new Error(message, { cause: error });
+    wrappedError.response = error?.response;
+    wrappedError.status = status;
+    return wrappedError;
+  }
+
   async uploadFile({ buffer, fileName, contentType = 'application/octet-stream', folderPath, access } = {}) {
     if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
       throw new Error('uploadFile requires a non-empty Buffer');
@@ -869,44 +1029,18 @@ class HubspotAdapter {
       }),
     );
 
-    const config = {
-      method: 'POST',
-      url: `${this.baseURL}/files/v3/files`,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-      data: form,
-      timeout: this.requestTimeout,
-      maxContentLength: 50 * 1024 * 1024,
-      maxBodyLength: 50 * 1024 * 1024,
-    };
+    const config = this._buildFileUploadConfig({ form });
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await this._scheduleRequest(() => this.client(config));
-        if (!response?.data) {
-          throw new Error('HubSpot file upload returned no data');
-        }
-        this.logger.info(
-          `HubSpot file upload OK: name=${fileName} bytes=${buffer.length} fileId=${response.data?.id || 'n/a'} url=${response.data?.url || 'n/a'}`,
-        );
-        return response.data;
+        return await this._uploadFileOnce(config, fileName, buffer.length);
       } catch (error) {
         const status = error?.response?.status;
-        const statusText = error?.response?.statusText || '';
         const retryAfterHeader = error?.response?.headers?.['retry-after'];
         const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
 
         if (!isRetryableStatus(status) || attempt >= this.maxRetries) {
-          const responseBody = safeStringify(error?.response?.data);
-          const { errorMessage } = extractHubspotErrorDetails(error?.response?.data);
-          const messageSuffix = errorMessage ? ` - ${errorMessage}` : '';
-          const message = `HubSpot file upload failed: POST /files/v3/files - ${status || 'unknown'} ${statusText}${messageSuffix}`;
-          this.logger.error({ status, statusText, responseBody, fileName }, message);
-          const wrappedError = new Error(message, { cause: error });
-          wrappedError.response = error?.response;
-          wrappedError.status = status;
-          throw wrappedError;
+          throw this._buildFileUploadError(error, fileName);
         }
 
         const delayMs = computeRetryDelay(attempt, retryAfterMs);

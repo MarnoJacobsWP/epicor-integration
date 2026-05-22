@@ -79,6 +79,19 @@ function extractHubspotErrorContext(error) {
   return { status, message, combinedMessage };
 }
 
+function getHubspotFileName(fileDetails) {
+  const path = String(fileDetails?.path || '').trim();
+  if (path) {
+    const segments = path.split('/').filter(Boolean);
+    return segments.at(-1) || '';
+  }
+
+  const name = String(fileDetails?.name || '').trim();
+  const extension = String(fileDetails?.extension || '').trim();
+  if (!name) return '';
+  return extension ? `${name}.${extension}` : name;
+}
+
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH = '/Sales Orders';
@@ -283,6 +296,21 @@ async function orderService(fastify, _) {
     }
 
     await deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId });
+
+    const uploadedFileName = getHubspotFileName(uploaded);
+    if (uploadedFileName && uploadedFileName !== fileName) {
+      try {
+        fastify.log.info(`${ctx}: Normalizing HubSpot file name from "${uploadedFileName}" to "${fileName}"...`);
+        await fastify.backoff(() => fastify.hubspotAdapter.renameFile(fileId, fileName));
+      } catch (error) {
+        const status = error?.cause?.response?.status || error?.response?.status;
+        const body = error?.cause?.response?.data || error?.response?.data;
+        fastify.log.warn(
+          { err: error, status, responseBody: body, fileId, uploadedFileName, desiredFileName: fileName },
+          `${ctx}: Could not normalize uploaded file name: ${error.message}`,
+        );
+      }
+    }
 
     fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);
   }

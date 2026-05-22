@@ -85,6 +85,19 @@ function normalizeOptionKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function getHubspotFileName(fileDetails) {
+  const path = String(fileDetails?.path || '').trim();
+  if (path) {
+    const segments = path.split('/').filter(Boolean);
+    return segments.at(-1) || '';
+  }
+
+  const name = String(fileDetails?.name || '').trim();
+  const extension = String(fileDetails?.extension || '').trim();
+  if (!name) return '';
+  return extension ? `${name}.${extension}` : name;
+}
+
 function buildOptionResolverFromDetailed(detailedOptions) {
   const lookup = new Map();
   for (const option of detailedOptions || []) {
@@ -100,6 +113,44 @@ function buildOptionResolverFromDetailed(detailedOptions) {
 async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const UNKNOWN_OPTION = 'Unknown Option';
+
+  async function deletePreviousQuotePdf({ ctx, previousFileId, fileId }) {
+    const previousId = previousFileId == null ? '' : String(previousFileId).trim();
+    if (!previousId || previousId === String(fileId)) {
+      return;
+    }
+
+    try {
+      fastify.log.info(`${ctx}: Step 4/4 — Deleting previous HubSpot file ${previousId}...`);
+      await fastify.backoff(() => fastify.hubspotAdapter.deleteFile(previousId));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.warn(
+        { err: error, status, responseBody: body, previousFileId: previousId, fileId },
+        `${ctx}: Step 4/4 FAILED — could not delete previous HubSpot file: ${error.message}`,
+      );
+    }
+  }
+
+  async function normalizeUploadedQuotePdfName({ ctx, uploaded, fileId, fileName }) {
+    const uploadedFileName = getHubspotFileName(uploaded);
+    if (!uploadedFileName || uploadedFileName === fileName) {
+      return;
+    }
+
+    try {
+      fastify.log.info(`${ctx}: Normalizing HubSpot file name from "${uploadedFileName}" to "${fileName}"...`);
+      await fastify.backoff(() => fastify.hubspotAdapter.renameFile(fileId, fileName));
+    } catch (error) {
+      const status = error?.cause?.response?.status || error?.response?.status;
+      const body = error?.cause?.response?.data || error?.response?.data;
+      fastify.log.warn(
+        { err: error, status, responseBody: body, fileId, uploadedFileName, desiredFileName: fileName },
+        `${ctx}: Could not normalize uploaded file name: ${error.message}`,
+      );
+    }
+  }
 
   async function getSalesRepOptions() {
     try {
@@ -293,20 +344,8 @@ async function quoteService(fastify, _) {
       return;
     }
 
-    const previousId = previousFileId == null ? '' : String(previousFileId).trim();
-    if (previousId && previousId !== String(fileId)) {
-      try {
-        fastify.log.info(`${ctx}: Step 4/4 — Deleting previous HubSpot file ${previousId}...`);
-        await fastify.backoff(() => fastify.hubspotAdapter.deleteFile(previousId));
-      } catch (error) {
-        const status = error?.cause?.response?.status || error?.response?.status;
-        const body = error?.cause?.response?.data || error?.response?.data;
-        fastify.log.warn(
-          { err: error, status, responseBody: body, previousFileId: previousId, fileId },
-          `${ctx}: Step 4/4 FAILED — could not delete previous HubSpot file: ${error.message}`,
-        );
-      }
-    }
+    await deletePreviousQuotePdf({ ctx, previousFileId, fileId });
+    await normalizeUploadedQuotePdfName({ ctx, uploaded, fileId, fileName });
 
     fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);
   }
