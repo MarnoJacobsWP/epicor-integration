@@ -101,6 +101,7 @@ export default async function app(fastify, opts) {
       'orders',
       'quotes',
       'manualSync',
+      'fileAudit',
       'sync',
       'system',
       'epicorExport'

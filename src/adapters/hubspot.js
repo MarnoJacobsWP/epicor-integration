@@ -100,7 +100,7 @@ class HubspotAdapter {
     this.requestTimeout = constants?.REQUEST_TIMEOUT || DEFAULT_TIMEOUT_MS;
     this.minRequestIntervalMs = Number(config?.HUBSPOT_MIN_REQUEST_INTERVAL_MS || 125);
     this.filesFolderPath = sanitizeConfiguredValue(config?.HUBSPOT_FILES_FOLDER_PATH) || '/Quotes';
-    this.filesAccess = sanitizeConfiguredValue(config?.HUBSPOT_FILES_ACCESS) || 'PRIVATE';
+    this.filesAccess = sanitizeConfiguredValue(config?.HUBSPOT_FILES_ACCESS) || 'PUBLIC_NOT_INDEXABLE';
     this.requestQueue = null;
     this.nextRequestAt = 0;
     this.propertyOptionsCache = new Map();
@@ -955,6 +955,130 @@ class HubspotAdapter {
 
     throw new Error(
       `HubSpot file rename failed for fileId=${normalizedFileId} desiredName=${normalizedDesiredName}: ${lastError?.message || 'unknown error'}`,
+      { cause: lastError },
+    );
+  }
+
+  /**
+   * Update a file's access level (e.g. 'PUBLIC_NOT_INDEXABLE', 'PRIVATE').
+   * PATCH /files/v3/files/{id}. Mirrors renameFile's tolerant approach: the
+   * accepted body shape for HubSpot's Files v3 PATCH has quirks, so try a
+   * couple of shapes and confirm via getFileById. Verify against one real file
+   * before trusting in bulk.
+   */
+  async updateFileAccess(fileId, access) {
+    if ((!isNonEmptyString(fileId) && typeof fileId !== 'number') || !isNonEmptyString(access)) {
+      throw new Error('updateFileAccess requires a fileId and access');
+    }
+
+    const normalizedFileId = String(fileId).trim();
+    const normalizedAccess = access.trim();
+
+    const attempts = [
+      { access: normalizedAccess },
+      { options: { access: normalizedAccess } },
+    ];
+
+    let lastError;
+    for (const payload of attempts) {
+      try {
+        await this._makeRequest('PATCH', `/files/v3/files/${normalizedFileId}`, payload);
+        return await this.getFileById(normalizedFileId);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(
+      `HubSpot file access update failed for fileId=${normalizedFileId} access=${normalizedAccess}: ${lastError?.message || 'unknown error'}`,
+      { cause: lastError },
+    );
+  }
+
+  /**
+   * List all folders in the portal (paginated) and return the raw folder
+   * objects. Each has at least { id, name, path, parentFolderId }.
+   */
+  async listAllFolders() {
+    const folders = [];
+    let after;
+
+    do {
+      const params = { limit: 100 };
+      if (after) {
+        params.after = after;
+      }
+      const response = await this._makeRequest('GET', '/files/v3/folders', null, { params });
+      const data = response?.data;
+      for (const folder of data?.results || []) {
+        folders.push(folder);
+      }
+      after = data?.paging?.next?.after;
+    } while (after);
+
+    return folders;
+  }
+
+  /**
+   * Resolve a logical folder path (e.g. '/Sales Orders') to its canonical
+   * numeric folderId. HubSpot's v3 file "move" PATCH takes a numeric folderId,
+   * not a path — and paths are not guaranteed unique, so this returns ALL
+   * matching folders. Caller decides what to do when more than one matches.
+   * Returns { path, matches: [{ id, name, path }], folderId|null }.
+   */
+  async resolveFolderId(folderPath) {
+    if (!isNonEmptyString(folderPath)) {
+      throw new Error('resolveFolderId requires a folderPath');
+    }
+    const wanted = folderPath.trim().replace(/\/+$/, '').toLowerCase();
+    const folders = await this.listAllFolders();
+
+    const matches = folders.filter((f) => {
+      const path = String(f?.path ?? '').replace(/\/+$/, '').toLowerCase();
+      const name = String(f?.name ?? '').toLowerCase();
+      // Match on full path, or on bare name when path is absent/relative.
+      return path === wanted || `/${name}` === wanted;
+    });
+
+    return {
+      path: folderPath,
+      matches: matches.map((f) => ({ id: String(f.id), name: f.name, path: f.path })),
+      folderId: matches.length ? String(matches[0].id) : null,
+    };
+  }
+
+  /**
+   * Move a file into a folder by numeric folderId. PATCH /files/v3/files/{id}.
+   * As with renameFile/updateFileAccess, the accepted body shape is quirky, so
+   * try a couple of shapes and confirm via getFileById.
+   */
+  async moveFileToFolder(fileId, folderId) {
+    if ((!isNonEmptyString(fileId) && typeof fileId !== 'number')
+      || (!isNonEmptyString(folderId) && typeof folderId !== 'number')) {
+      throw new Error('moveFileToFolder requires a fileId and numeric folderId');
+    }
+
+    const normalizedFileId = String(fileId).trim();
+    const normalizedFolderId = String(folderId).trim();
+
+    const attempts = [
+      { parentFolderId: normalizedFolderId },
+      { folderId: normalizedFolderId },
+      { options: { parentFolderId: normalizedFolderId } },
+    ];
+
+    let lastError;
+    for (const payload of attempts) {
+      try {
+        await this._makeRequest('PATCH', `/files/v3/files/${normalizedFileId}`, payload);
+        return await this.getFileById(normalizedFileId);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(
+      `HubSpot file move failed for fileId=${normalizedFileId} folderId=${normalizedFolderId}: ${lastError?.message || 'unknown error'}`,
       { cause: lastError },
     );
   }

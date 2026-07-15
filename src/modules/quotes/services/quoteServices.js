@@ -305,11 +305,12 @@ async function quoteService(fastify, _) {
     const fileName = `Quote-${quoteNum}.pdf`;
     let uploaded;
     try {
-      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${fastify.config.HUBSPOT_FILES_FOLDER_PATH || '/Quotes'}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
+      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${fastify.config.HUBSPOT_FILES_FOLDER_PATH || '/Quotes'}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PUBLIC_NOT_INDEXABLE'})...`);
       uploaded = await fastify.backoff(() => fastify.hubspotAdapter.uploadFile({
         buffer,
         fileName,
         contentType: 'application/pdf',
+        access: 'PUBLIC_NOT_INDEXABLE',
       }));
     } catch (error) {
       const status = error?.cause?.response?.status || error?.response?.status;

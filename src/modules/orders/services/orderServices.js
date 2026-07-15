@@ -94,7 +94,7 @@ function getHubspotFileName(fileDetails) {
 
 async function orderService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
-  const HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH = '/Sales Orders';
+  const HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH = fastify.config?.HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH || '/Sales Orders';
 
   async function ensureDealCompanyAssociation(dealId, companyId) {
     if (!dealId || !companyId) return { skipped: true };
@@ -255,12 +255,13 @@ async function orderService(fastify, _) {
     const fileName = `Sales Order-${orderNum}.pdf`;
     let uploaded;
     try {
-      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PRIVATE'})...`);
+      fastify.log.info(`${ctx}: Step 2/3 — Uploading "${fileName}" to HubSpot Files (folder=${HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH}, access=${fastify.config.HUBSPOT_FILES_ACCESS || 'PUBLIC_NOT_INDEXABLE'})...`);
       uploaded = await fastify.backoff(() => fastify.hubspotAdapter.uploadFile({
         buffer,
         fileName,
         contentType: 'application/pdf',
         folderPath: HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH,
+        access: 'PUBLIC_NOT_INDEXABLE',
       }));
     } catch (error) {
       const status = error?.cause?.response?.status || error?.response?.status;

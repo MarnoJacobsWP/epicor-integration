@@ -115,9 +115,13 @@
       "type": "string",
       "default": "/Quotes"
     },
+    "HUBSPOT_SALES_ORDER_FILES_FOLDER_PATH": {
+      "type": "string",
+      "default": "/Sales Orders"
+    },
     "HUBSPOT_FILES_ACCESS": {
       "type": "string",
-      "default": "PRIVATE"
+      "default": "PUBLIC_NOT_INDEXABLE"
     }
   }
 }
