@@ -75,6 +75,24 @@ export function repairedName(basename) {
 }
 
 /**
+ * The corrected `name` FIELD value for a doubled-extension file, or null if fine.
+ * HubSpot builds the displayed path as `name + "." + extension`, so a file stored
+ * as name="Quote-168938.pdf" / extension="pdf" renders as ".../Quote-168938.pdf.pdf".
+ * The fix is to strip the redundant trailing ".<ext>" from `name` (renameFile
+ * with this stem makes HubSpot append the extension exactly once). Passing the
+ * full "Quote-168938.pdf" instead is a silent no-op — HubSpot keeps that as the
+ * name and re-appends ".pdf" → still doubled. Verified empirically.
+ */
+export function desiredNameField(file) {
+  const name = typeof file?.name === 'string' ? file.name : '';
+  const ext = typeof file?.extension === 'string' ? file.extension : '';
+  if (!name || !ext) return null;
+  const re = new RegExp(`(\\.${ext.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})+$`, 'i');
+  const fixed = name.replace(re, '');
+  return fixed && fixed !== name ? fixed : null;
+}
+
+/**
  * HubSpot returns 400 "File visibility cannot be changed" for files whose access
  * cannot be PATCHed (e.g. PRIVATE). Those must be regenerated instead of flipped.
  */
@@ -356,20 +374,21 @@ export async function fixNames(ctx, folders, body = {}) {
     const tag = `[${i}/${refs.length}] deal=${ref.dealId} file=${ref.fileId}`;
     try {
       const file = await ctx.run(() => ctx.adapter.getFileById(ref.fileId), 'fileAudit.getFileById');
-      const basename = displayName(file);
-      const fixedName = repairedName(basename);
-      if (!fixedName) {
+      const nameStem = desiredNameField(file); // the `name` field to set (no extension)
+      if (!nameStem) {
         results.skipped += 1;
         continue;
       }
+      const fromDisplay = displayName(file);
+      const toDisplay = repairedName(fromDisplay) || `${nameStem}.${file.extension}`;
       if (detail.length < 25) {
-        detail.push({ dealId: ref.dealId, fileId: ref.fileId, from: basename, to: fixedName });
+        detail.push({ dealId: ref.dealId, fileId: ref.fileId, from: fromDisplay, to: toDisplay });
       }
       if (!dryRun) {
-        await ctx.run(() => ctx.adapter.renameFile(ref.fileId, fixedName), 'fileAudit.renameFile');
+        await ctx.run(() => ctx.adapter.renameFile(ref.fileId, nameStem), 'fileAudit.renameFile');
       }
       results.renamed += 1; // would-rename when dryRun
-      ctx.log.info(`${tag} "${basename}" -> "${fixedName}"${dryRun ? ' (dry-run)' : ' OK'}`);
+      ctx.log.info(`${tag} "${fromDisplay}" -> "${toDisplay}"${dryRun ? ' (dry-run)' : ' OK'}`);
     } catch (error) {
       results.errors += 1;
       ctx.log.info(`${tag} ERROR: ${error.message}`);

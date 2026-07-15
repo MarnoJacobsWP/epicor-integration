@@ -937,10 +937,15 @@ class HubspotAdapter {
     const normalizedDesiredName = String(desiredName).trim();
     const desiredStem = normalizedDesiredName.replace(/\.[^.]+$/, '');
 
+    // Stem FIRST: HubSpot stores `name` without the extension and rebuilds the
+    // path as `name + "." + extension`. Sending the full "Quote-X.pdf" as name
+    // makes HubSpot re-append the extension → "Quote-X.pdf.pdf". Sending the
+    // stem "Quote-X" yields the correct single-extension path. (Full-name shapes
+    // kept as fallbacks for files without an extension.)
     const attempts = [
+      { name: desiredStem },
       { name: normalizedDesiredName },
       { fileName: normalizedDesiredName },
-      { name: desiredStem },
     ];
 
     let lastError;
