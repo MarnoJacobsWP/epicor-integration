@@ -1252,3 +1252,7 @@ export default fp(hubspotAdapterPlugin, {
   name: 'hubspotAdapter',
   dependencies: ['httpClient', 'appConfig', 'constants'],
 });
+
+// Exported for standalone use (e.g. scripts/hubspotBackfill.js) so admin
+// tooling can construct the same adapter the app uses without booting Fastify.
+export { HubspotAdapter };

@@ -652,7 +652,13 @@ async function quoteService(fastify, _) {
   }
 
   if (!fastify.hasDecorator('quoteTask')) {
-    fastify.decorate('quoteTask', { task, processQuotesIndividually });
+    // regenerateQuotePdf is exposed for the fileAudit backfill (bypasses the
+    // dealstage guard in ensureQuotePdfOnDeal — we intentionally regenerate all).
+    fastify.decorate('quoteTask', {
+      task,
+      processQuotesIndividually,
+      regenerateQuotePdf: generateAndUploadQuotePdf,
+    });
   }
 }
 

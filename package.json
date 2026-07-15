@@ -9,7 +9,8 @@
     "dev": "NODE_ENV=development node src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint .",
-    "production": "NODE_ENV=production node src/server.js"
+    "production": "NODE_ENV=production node src/server.js",
+    "backfill": "node scripts/hubspotBackfill.js"
   },
   "keywords": ["epicor", "hubspot", "integration"],
   "author": "",

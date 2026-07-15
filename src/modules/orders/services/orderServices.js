@@ -615,7 +615,13 @@ async function orderService(fastify, _) {
   }
 
   if (!fastify.hasDecorator('orderTask')) {
-    fastify.decorate('orderTask', { task, processOrdersIndividually });
+    // regenerateSalesOrderPdf is exposed for the fileAudit backfill (bypasses the
+    // dealstage guard in ensureSalesOrderPdfOnDeal — we intentionally regenerate all).
+    fastify.decorate('orderTask', {
+      task,
+      processOrdersIndividually,
+      regenerateSalesOrderPdf: generateAndUploadSalesOrderPdf,
+    });
   }
 }
 
