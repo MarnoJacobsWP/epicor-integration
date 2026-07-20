@@ -306,10 +306,9 @@ export async function diagnose(ctx, folders, body = {}) {
 
 /** Set every existing PDF to PUBLIC_NOT_INDEXABLE. In-place PATCH, no re-upload. */
 export async function backfillAccess(ctx, folders, body = {}) {
-  const dryRun = body?.dryRun !== false; // default true
   const refs = await selectRefs(ctx, folders, body);
 
-  const results = { total: refs.length, updated: 0, skipped: 0, errors: 0, dryRun };
+  const results = { total: refs.length, updated: 0, skipped: 0, errors: 0 };
   const errorDetail = [];
   const needsRegeneration = [];
   let i = 0;
@@ -326,11 +325,9 @@ export async function backfillAccess(ctx, folders, body = {}) {
         ctx.log.info(`${tag} already ${DESIRED_ACCESS} — skip`);
         continue;
       }
-      if (!dryRun) {
-        await ctx.run(() => ctx.adapter.updateFileAccess(ref.fileId, DESIRED_ACCESS), 'fileAudit.updateFileAccess');
-      }
-      results.updated += 1; // would-update when dryRun
-      ctx.log.info(`${tag} ${current} -> ${DESIRED_ACCESS}${dryRun ? ' (dry-run)' : ' OK'}`);
+      await ctx.run(() => ctx.adapter.updateFileAccess(ref.fileId, DESIRED_ACCESS), 'fileAudit.updateFileAccess');
+      results.updated += 1; // applied
+      ctx.log.info(`${tag} ${current} -> ${DESIRED_ACCESS} OK`);
     } catch (error) {
       // Files HubSpot refuses to re-visibility must be regenerated instead.
       if (isVisibilityBlocked(error)) {
@@ -353,7 +350,7 @@ export async function backfillAccess(ctx, folders, body = {}) {
   }
 
   ctx.log.info(
-    `fileAudit backfillAccess (dryRun=${dryRun}): ${results.updated} ${dryRun ? 'would-update' : 'updated'}, ${results.skipped} skipped, ${needsRegeneration.length} need-regeneration, ${results.errors} errors`,
+    `fileAudit backfillAccess: ${results.updated} updated, ${results.skipped} skipped, ${needsRegeneration.length} need-regeneration, ${results.errors} errors`,
   );
   return {
     success: true,
@@ -368,10 +365,9 @@ export async function backfillAccess(ctx, folders, body = {}) {
 
 /** Repair doubled ".pdf.pdf" extensions via in-place rename (no re-upload). */
 export async function fixNames(ctx, folders, body = {}) {
-  const dryRun = body?.dryRun !== false; // default true
   const refs = await selectRefs(ctx, folders, body);
 
-  const results = { total: refs.length, renamed: 0, skipped: 0, errors: 0, dryRun };
+  const results = { total: refs.length, renamed: 0, skipped: 0, errors: 0 };
   const detail = [];
   let i = 0;
 
@@ -390,11 +386,9 @@ export async function fixNames(ctx, folders, body = {}) {
       if (detail.length < 25) {
         detail.push({ dealId: ref.dealId, fileId: ref.fileId, from: fromDisplay, to: toDisplay });
       }
-      if (!dryRun) {
-        await ctx.run(() => ctx.adapter.renameFile(ref.fileId, nameStem), 'fileAudit.renameFile');
-      }
-      results.renamed += 1; // would-rename when dryRun
-      ctx.log.info(`${tag} "${fromDisplay}" -> "${toDisplay}"${dryRun ? ' (dry-run)' : ' OK'}`);
+      await ctx.run(() => ctx.adapter.renameFile(ref.fileId, nameStem), 'fileAudit.renameFile');
+      results.renamed += 1; // applied
+      ctx.log.info(`${tag} "${fromDisplay}" -> "${toDisplay}" OK`);
     } catch (error) {
       results.errors += 1;
       ctx.log.info(`${tag} ERROR: ${error.message}`);
@@ -405,7 +399,7 @@ export async function fixNames(ctx, folders, body = {}) {
   }
 
   ctx.log.info(
-    `fileAudit fixNames (dryRun=${dryRun}): ${results.renamed} ${dryRun ? 'would-rename' : 'renamed'}, ${results.skipped} skipped, ${results.errors} errors`,
+    `fileAudit fixNames: ${results.renamed} renamed, ${results.skipped} skipped, ${results.errors} errors`,
   );
   return { success: true, ...results, detail };
 }
@@ -417,7 +411,6 @@ export async function fixNames(ctx, folders, body = {}) {
  * override map from body.folderIds.
  */
 export async function backfillFolder(ctx, folders, body = {}) {
-  const dryRun = body?.dryRun !== false; // default true
   const overrideIds = body?.folderIds || {};
 
   const expectedFolders = [...new Set(FILE_PROPERTIES.map((p) => expectedFolderFor(p, folders)))];
@@ -437,7 +430,7 @@ export async function backfillFolder(ctx, folders, body = {}) {
   }
 
   const refs = await selectRefs(ctx, folders, body);
-  const results = { total: refs.length, updated: 0, skipped: 0, errors: 0, dryRun };
+  const results = { total: refs.length, updated: 0, skipped: 0, errors: 0 };
   const errorDetail = [];
   let i = 0;
 
@@ -465,11 +458,9 @@ export async function backfillFolder(ctx, folders, body = {}) {
         results.skipped += 1;
         continue;
       }
-      if (!dryRun) {
-        await ctx.run(() => ctx.adapter.moveFileToFolder(ref.fileId, targetId), 'fileAudit.moveFileToFolder');
-      }
-      results.updated += 1; // would-move when dryRun
-      ctx.log.info(`${tag} folder ${currentFolderId ?? 'n/a'} -> ${targetId}${dryRun ? ' (dry-run)' : ' OK'}`);
+      await ctx.run(() => ctx.adapter.moveFileToFolder(ref.fileId, targetId), 'fileAudit.moveFileToFolder');
+      results.updated += 1; // applied
+      ctx.log.info(`${tag} folder ${currentFolderId ?? 'n/a'} -> ${targetId} OK`);
     } catch (error) {
       results.errors += 1;
       ctx.log.info(`${tag} ERROR: ${error.message}`);
@@ -480,7 +471,7 @@ export async function backfillFolder(ctx, folders, body = {}) {
   }
 
   ctx.log.info(
-    `fileAudit backfillFolder (dryRun=${dryRun}): ${results.updated} ${dryRun ? 'would-move' : 'moved'}, ${results.skipped} skipped, ${results.errors} errors`,
+    `fileAudit backfillFolder: ${results.updated} moved, ${results.skipped} skipped, ${results.errors} errors`,
   );
   return { success: true, targets: resolution, ...results, errors: errorDetail };
 }
@@ -500,11 +491,10 @@ export async function backfillFolder(ctx, folders, body = {}) {
  *   regenerateOrder(orderNum, dealId, previousFileId)
  */
 export async function fixPdfNumberMismatch(ctx, folders, body = {}) {
-  const dryRun = body?.dryRun !== false; // default true
   const refs = await selectRefs(ctx, folders, body);
 
   const results = {
-    total: refs.length, fixed: 0, matched: 0, noDealNumber: 0, missingFile: 0, errors: 0, dryRun,
+    total: refs.length, fixed: 0, matched: 0, noDealNumber: 0, missingFile: 0, errors: 0,
   };
   const detail = [];
   const errorDetail = [];
@@ -546,17 +536,15 @@ export async function fixPdfNumberMismatch(ctx, folders, body = {}) {
     });
 
     try {
-      if (!dryRun) {
-        // null previousFileId => the mismatched file is left in place, not deleted.
-        if (ref.property === 'quote_pdf') {
-          await ctx.regenerateQuote(ref.number, ref.dealId, null);
-        } else {
-          await ctx.regenerateOrder(ref.number, ref.dealId, null);
-        }
+      // null previousFileId => the mismatched file is left in place, not deleted.
+      if (ref.property === 'quote_pdf') {
+        await ctx.regenerateQuote(ref.number, ref.dealId, null);
+      } else {
+        await ctx.regenerateOrder(ref.number, ref.dealId, null);
       }
       results.fixed += 1;
       ctx.log.info(
-        `${tag} deal#${ref.number} != file#${fileNumber || 'NONE'} ("${basename}") -> regenerate${dryRun ? ' (dry-run)' : ' OK'}`,
+        `${tag} deal#${ref.number} != file#${fileNumber || 'NONE'} ("${basename}") -> regenerate OK`,
       );
     } catch (error) {
       results.errors += 1;
@@ -568,7 +556,7 @@ export async function fixPdfNumberMismatch(ctx, folders, body = {}) {
   }
 
   ctx.log.info(
-    `fileAudit fixPdfNumberMismatch (dryRun=${dryRun}): ${results.fixed} ${dryRun ? 'would-fix' : 'fixed'}, ${results.matched} already correct, ${results.missingFile} missing file, ${results.noDealNumber} no deal number, ${results.errors} errors`,
+    `fileAudit fixPdfNumberMismatch: ${results.fixed} fixed, ${results.matched} already correct, ${results.missingFile} missing file, ${results.noDealNumber} no deal number, ${results.errors} errors`,
   );
   return { success: true, ...results, mismatches: detail, errors: errorDetail };
 }
@@ -585,10 +573,9 @@ export async function fixPdfNumberMismatch(ctx, folders, body = {}) {
  *   regenerateOrder(orderNum, dealId, previousFileId)
  */
 export async function regenerate(ctx, folders, body = {}) {
-  const dryRun = body?.dryRun !== false; // default true
   const refs = await selectRefs(ctx, folders, body);
 
-  const results = { total: refs.length, regenerated: 0, skipped: 0, errors: 0, dryRun };
+  const results = { total: refs.length, regenerated: 0, skipped: 0, errors: 0 };
   const errorDetail = [];
   let i = 0;
 
@@ -613,15 +600,13 @@ export async function regenerate(ctx, folders, body = {}) {
         continue;
       }
 
-      if (!dryRun) {
-        if (ref.property === 'quote_pdf') {
-          await ctx.regenerateQuote(number, ref.dealId, ref.fileId);
-        } else {
-          await ctx.regenerateOrder(number, ref.dealId, ref.fileId);
-        }
+      if (ref.property === 'quote_pdf') {
+        await ctx.regenerateQuote(number, ref.dealId, ref.fileId);
+      } else {
+        await ctx.regenerateOrder(number, ref.dealId, ref.fileId);
       }
-      results.regenerated += 1; // would-regenerate when dryRun
-      ctx.log.info(`${tag} regenerate num=${number}${dryRun ? ' (dry-run)' : ' OK'}`);
+      results.regenerated += 1; // applied
+      ctx.log.info(`${tag} regenerate num=${number} OK`);
     } catch (error) {
       results.errors += 1;
       ctx.log.info(`${tag} ERROR: ${error.message}`);
@@ -632,7 +617,7 @@ export async function regenerate(ctx, folders, body = {}) {
   }
 
   ctx.log.info(
-    `fileAudit regenerate (dryRun=${dryRun}): ${results.regenerated} ${dryRun ? 'would-regenerate' : 'regenerated'}, ${results.skipped} skipped, ${results.errors} errors`,
+    `fileAudit regenerate: ${results.regenerated} regenerated, ${results.skipped} skipped, ${results.errors} errors`,
   );
   return { success: true, ...results, errors: errorDetail };
 }

@@ -181,14 +181,25 @@ async function main() {
   }
 
   const body = {
-    dryRun: !flags.apply, // dry run unless --apply
     dealIds: typeof flags.deals === 'string' ? flags.deals.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     limit: flags.limit !== undefined ? Number(flags.limit) : undefined,
     folderIds: parseFolderIds(flags.folderIds),
   };
 
+  // There is no dry-run any more: these operations apply immediately. Keep an
+  // explicit --apply confirmation on the CLI so a bare command can't mass-mutate.
   const mutating = command !== 'diagnose';
-  console.error(`\n=== hubspotBackfill: ${command} ${mutating ? (body.dryRun ? '(DRY RUN)' : '(APPLYING CHANGES)') : ''} ===`);
+  if (mutating && !flags.apply) {
+    console.error(
+      `\n"${command}" applies changes immediately (there is no dry run).\n` +
+      `Re-run with --apply to confirm, e.g.:\n  node scripts/hubspotBackfill.js ${command} --apply\n` +
+      'Use --deals=<id,...> or --limit=<n> to scope it first.',
+    );
+    process.exit(1);
+    return;
+  }
+
+  console.error(`\n=== hubspotBackfill: ${command} ${mutating ? '(APPLYING CHANGES)' : ''} ===`);
   if (body.dealIds) console.error(`Scoped to deals: ${body.dealIds.join(', ')}`);
   if (body.limit) console.error(`Limit: ${body.limit}`);
 

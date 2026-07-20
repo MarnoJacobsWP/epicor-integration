@@ -10,8 +10,8 @@ import * as core from './core.js';
  * same operations can run from the local CLI (scripts/hubspotBackfill.js)
  * without deploying to Lightsail. Every operation is HubSpot-only.
  *
- * Routes (all accept optional body { dryRun, dealIds, limit }; mutating routes
- * default dryRun:true):
+ * Routes accept optional { dealIds, limit } (JSON body or query string) to scope
+ * a run. There is no dry-run: a POST APPLIES the changes immediately.
  *   POST /fileAudit/diagnose       — read-only report (access, folder drift, name issues)
  *   POST /fileAudit/backfillAccess — set files to PUBLIC_NOT_INDEXABLE (in-place PATCH)
  *   POST /fileAudit/fixNames       — repair ".pdf.pdf" -> ".pdf" (in-place rename)
@@ -39,8 +39,12 @@ export default fp(
 
     const route = (path, fn) => {
       fastify.post(path, async (request, reply) => {
+        // Merge query params with the JSON body so scoping works either way
+        // (`?limit=5` or a JSON body). These routes APPLY changes immediately.
+        const input = { ...(request.query || {}), ...(request.body || {}) };
         try {
-          return await fn(ctx, folders, request.body || {});
+          fastify.log.info(`fileAudit ${path}: APPLYING — input=${JSON.stringify(input)}`);
+          return await fn(ctx, folders, input);
         } catch (error) {
           fastify.log.error(`fileAudit ${path} failed: ${error.message}`);
           return reply.status(500).send({ success: false, error: error.message });
