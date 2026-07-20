@@ -233,11 +233,24 @@ async function quoteService(fastify, _) {
     }
   }
 
-  async function ensureQuotePdfOnDeal(quoteNum, dealId, dealstage) {
-    if (dealstage !== HUBSPOT_DEAL_STAGES.QUOTE_CREATED) {
-      fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} stage=${dealstage} — not QUOTE_CREATED, skipping PDF check`);
-      return;
+  /**
+   * The quote number a stored quote_pdf file actually belongs to, e.g.
+   * "Quote-170240.pdf" -> "170240". Returns null when it cannot be determined
+   * (including when the file no longer exists).
+   */
+  async function quoteNumOnPdfFile(fileId) {
+    try {
+      const file = await fastify.backoff(() => fastify.hubspotAdapter.getFileById(fileId));
+      const match = /Quote-(\d+)/i.exec(getHubspotFileName(file) || '');
+      return match ? match[1] : null;
+    } catch (error) {
+      fastify.log.warn(`Could not read quote_pdf file ${fileId}: ${error.message}`);
+      return null;
     }
+  }
+
+  async function ensureQuotePdfOnDeal(quoteNum, dealId, dealstage) {
+    const isQuoteCreated = dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
 
     let existing;
     try {
@@ -249,13 +262,37 @@ async function quoteService(fastify, _) {
       fastify.log.warn(`Quote ${quoteNum}: Could not read quote_pdf on deal ${dealId}: ${error.message}. Will attempt PDF generation anyway.`);
     }
 
-    if (existing && String(existing).trim() !== '') {
+    const hasExisting = Boolean(existing) && String(existing).trim() !== '';
+    let correctingMismatch = false;
+
+    if (!isQuoteCreated) {
+      // Closed deals: still don't CREATE a missing PDF (unchanged behaviour), but
+      // DO correct one that points at a different quote's file. Several quotes for
+      // the same job+customer share one deal, and orderdtl_quotenum is rewritten on
+      // every sync while the PDF used to be frozen once the deal closed — that is
+      // what let quote_pdf and orderdtl_quotenum drift apart.
+      if (!hasExisting) {
+        fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} stage=${dealstage} with no quote_pdf — skipping PDF check`);
+        return;
+      }
+      const fileQuoteNum = await quoteNumOnPdfFile(existing);
+      if (fileQuoteNum === String(quoteNum).trim()) {
+        fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} stage=${dealstage} and quote_pdf already matches — skipping`);
+        return;
+      }
+      correctingMismatch = true;
+      fastify.log.warn(
+        `Quote ${quoteNum}: Deal ${dealId} quote_pdf is for quote ${fileQuoteNum || 'unknown'} — regenerating to match ${quoteNum}`,
+      );
+    } else if (hasExisting) {
       fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} already has quote_pdf=${existing} — refreshing PDF upload`);
     } else {
       fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} is in QUOTE_CREATED stage with no quote_pdf — triggering PDF generation`);
     }
 
-    await generateAndUploadQuotePdf(quoteNum, dealId, existing);
+    // When correcting a mismatch, do NOT pass the previous fileId: that file is
+    // very likely the rightful PDF of another deal and must not be deleted.
+    await generateAndUploadQuotePdf(quoteNum, dealId, correctingMismatch ? null : existing);
   }
 
   async function generateAndUploadQuotePdf(quoteNum, dealId, previousFileId) {

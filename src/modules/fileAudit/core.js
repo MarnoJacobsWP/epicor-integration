@@ -100,6 +100,12 @@ function isVisibilityBlocked(error) {
   return /visibility cannot be changed/i.test(String(error?.message || ''));
 }
 
+/** Filename -> number patterns, per deal property. */
+const NUMBER_RE = {
+  quote_pdf: /Quote-(\d+)/i,
+  sales_order_pdf: /Sales[- ]Order-(\d+)/i,
+};
+
 /** Fallback: extract the Epicor number from a filename like "Quote-170240.pdf". */
 function numberFromFileName(basename, property) {
   if (typeof basename !== 'string') return null;
@@ -477,6 +483,94 @@ export async function backfillFolder(ctx, folders, body = {}) {
     `fileAudit backfillFolder (dryRun=${dryRun}): ${results.updated} ${dryRun ? 'would-move' : 'moved'}, ${results.skipped} skipped, ${results.errors} errors`,
   );
   return { success: true, targets: resolution, ...results, errors: errorDetail };
+}
+
+/**
+ * Fix deals whose quote_pdf / sales_order_pdf points at a file belonging to a
+ * DIFFERENT quote/order number than the deal's own number (orderdtl_quotenum /
+ * orderhed_ordernum). Regenerates the PDF from Epicor for the DEAL's number and
+ * repoints the property at the new file.
+ *
+ * SAFETY: previousFileId is deliberately passed as null so the mismatched file is
+ * NEVER deleted — it is very likely the rightful PDF of another deal. It is simply
+ * left in place and the deal is repointed.
+ *
+ * REQUIRES Epicor connectivity → Lightsail only. `ctx` must additionally provide:
+ *   regenerateQuote(quoteNum, dealId, previousFileId)
+ *   regenerateOrder(orderNum, dealId, previousFileId)
+ */
+export async function fixPdfNumberMismatch(ctx, folders, body = {}) {
+  const dryRun = body?.dryRun !== false; // default true
+  const refs = await selectRefs(ctx, folders, body);
+
+  const results = {
+    total: refs.length, fixed: 0, matched: 0, noDealNumber: 0, missingFile: 0, errors: 0, dryRun,
+  };
+  const detail = [];
+  const errorDetail = [];
+  let i = 0;
+
+  for (const ref of refs) {
+    i += 1;
+    const tag = `[${i}/${refs.length}] deal=${ref.dealId} ${ref.property}`;
+
+    if (!ref.number) {
+      results.noDealNumber += 1; // nothing authoritative to compare against
+      continue;
+    }
+
+    let file;
+    try {
+      file = await ctx.run(() => ctx.adapter.getFileById(ref.fileId), 'fileAudit.getFileById');
+    } catch {
+      results.missingFile += 1; // deal points at a deleted file; reported, not touched
+      continue;
+    }
+
+    const basename = displayName(file);
+    const match = NUMBER_RE[ref.property].exec(basename);
+    const fileNumber = match ? match[1] : null;
+
+    if (fileNumber === ref.number) {
+      results.matched += 1;
+      continue;
+    }
+
+    detail.push({
+      dealId: ref.dealId,
+      property: ref.property,
+      dealNumber: ref.number,
+      fileNumber,
+      fileName: basename,
+      oldFileId: ref.fileId,
+    });
+
+    try {
+      if (!dryRun) {
+        // null previousFileId => the mismatched file is left in place, not deleted.
+        if (ref.property === 'quote_pdf') {
+          await ctx.regenerateQuote(ref.number, ref.dealId, null);
+        } else {
+          await ctx.regenerateOrder(ref.number, ref.dealId, null);
+        }
+      }
+      results.fixed += 1;
+      ctx.log.info(
+        `${tag} deal#${ref.number} != file#${fileNumber || 'NONE'} ("${basename}") -> regenerate${dryRun ? ' (dry-run)' : ' OK'}`,
+      );
+    } catch (error) {
+      results.errors += 1;
+      ctx.log.info(`${tag} ERROR: ${error.message}`);
+      if (errorDetail.length < 25) {
+        errorDetail.push({ dealId: ref.dealId, fileId: ref.fileId, message: error.message });
+      }
+    }
+  }
+
+  ctx.log.info(
+    `fileAudit fixPdfNumberMismatch (dryRun=${dryRun}): ${results.fixed} ${dryRun ? 'would-fix' : 'fixed'}, ${results.matched} already correct, ${results.missingFile} missing file, ${results.noDealNumber} no deal number, ${results.errors} errors`,
+  );
+  return { success: true, ...results, mismatches: detail, errors: errorDetail };
 }
 
 /**

@@ -53,6 +53,7 @@ export default fp(
     route('/fileAudit/fixNames', core.fixNames);
     route('/fileAudit/backfillFolder', core.backfillFolder);
     route('/fileAudit/regenerate', core.regenerate);
+    route('/fileAudit/fixPdfNumberMismatch', core.fixPdfNumberMismatch);
 
     fastify.log.info('FileAudit module loaded');
   },
