@@ -15,6 +15,7 @@ const FIELD_MAPPINGS = [
   { epicor: 'Customer_Name', hubspot: 'customer_name' },//Customer Name/Quote To - customer_name
   { epicor: 'Task_Conclusion', hubspot: 'task_conclusion' },//Conclusion - task_conclusion
   { epicor: 'QuoteHed_EntryDate', hubspot: 'quotehed_entrydate', transform: toMidnightUTC },//Entrey Date - quotehed_entrydate
+  { epicor: 'QuoteHed_DateQuoted', hubspot: 'quotehed_datequoted', transform: toMidnightUTC },//Date Quoted - quotehed_datequoted
   { epicor: 'QuoteHed_CurrentStage', hubspot: 'quotehed_currentstage' },//Current Stage - quotehed_currentstage
   { epicor: 'QuoteHed_Character08', hubspot: 'orderhed_characternh' },//Job Name/Order Job Name - orderhed_characternh
   { epicor: 'QuoteHed_ShortChar09', hubspot: 'orderhed_shortcharni' },//Lead Time/Order Lead Time - orderhed_shortcharni
