@@ -2,6 +2,13 @@ import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
 import { toUnixSeconds } from '../../../utils/dateHelper.js';
 import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
+import {
+  MATCH_PROPERTIES,
+  pickReusableDealByName,
+  protectClosedDeal,
+  shouldRegeneratePdf,
+} from '../../shared/dealMatching.js';
+import { getPdfState, setPdfState } from '../../shared/pdfSyncState.js';
 
 const toMidnightUTC = (v) => {
   const d = new Date(v);
@@ -115,9 +122,19 @@ async function quoteService(fastify, _) {
   const { ENDPOINTS, HUBSPOT_PIPELINES, HUBSPOT_DEAL_STAGES, HUBSPOT_ASSOCIATIONS } = fastify.constants;
   const UNKNOWN_OPTION = 'Unknown Option';
 
-  async function deletePreviousQuotePdf({ ctx, previousFileId, fileId }) {
+  async function deletePreviousQuotePdf({ ctx, previousFileId, fileId, quoteNum }) {
     const previousId = previousFileId == null ? '' : String(previousFileId).trim();
     if (!previousId || previousId === String(fileId)) {
+      return;
+    }
+
+    // Only delete a file that belongs to this same quote. A file named for
+    // another quote (or unreadable) may be another deal's document.
+    const fileQuoteNum = await quoteNumOnPdfFile(previousId);
+    if (fileQuoteNum !== String(quoteNum).trim()) {
+      fastify.log.warn(
+        `${ctx}: Keeping previous HubSpot file ${previousId} (belongs to quote ${fileQuoteNum || 'unknown'}, not ${quoteNum})`,
+      );
       return;
     }
 
@@ -250,7 +267,7 @@ async function quoteService(fastify, _) {
     }
   }
 
-  async function ensureQuotePdfOnDeal(quoteNum, dealId, dealstage) {
+  async function ensureQuotePdfOnDeal(quoteNum, dealId, dealstage, recordTime) {
     const isQuoteCreated = dealstage === HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
 
     let existing;
@@ -268,10 +285,10 @@ async function quoteService(fastify, _) {
 
     if (!isQuoteCreated) {
       // Closed deals: still don't CREATE a missing PDF (unchanged behaviour), but
-      // DO correct one that points at a different quote's file. Several quotes for
-      // the same job+customer share one deal, and orderdtl_quotenum is rewritten on
-      // every sync while the PDF used to be frozen once the deal closed — that is
-      // what let quote_pdf and orderdtl_quotenum drift apart.
+      // DO correct one that points at a different quote's file. Before Nov 2026,
+      // quotes for the same job+customer could share one deal (name match), so
+      // orderdtl_quotenum and quote_pdf could drift apart. New quotes now get their
+      // own deal unless the named deal is free (see shared/dealMatching.js).
       if (!hasExisting) {
         fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} stage=${dealstage} with no quote_pdf — skipping PDF check`);
         return;
@@ -286,6 +303,11 @@ async function quoteService(fastify, _) {
         `Quote ${quoteNum}: Deal ${dealId} quote_pdf is for quote ${fileQuoteNum || 'unknown'} — regenerating to match ${quoteNum}`,
       );
     } else if (hasExisting) {
+      const state = await getPdfState(fastify, 'quote', quoteNum);
+      if (!shouldRegeneratePdf({ currentFileId: existing, recordTime, state })) {
+        fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} quote_pdf=${existing} is current (quote unchanged) — skipping PDF refresh`);
+        return;
+      }
       fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} already has quote_pdf=${existing} — refreshing PDF upload`);
     } else {
       fastify.log.info(`Quote ${quoteNum}: Deal ${dealId} is in QUOTE_CREATED stage with no quote_pdf — triggering PDF generation`);
@@ -293,10 +315,10 @@ async function quoteService(fastify, _) {
 
     // When correcting a mismatch, do NOT pass the previous fileId: that file is
     // very likely the rightful PDF of another deal and must not be deleted.
-    await generateAndUploadQuotePdf(quoteNum, dealId, correctingMismatch ? null : existing);
+    await generateAndUploadQuotePdf(quoteNum, dealId, correctingMismatch ? null : existing, recordTime);
   }
 
-  async function generateAndUploadQuotePdf(quoteNum, dealId, previousFileId) {
+  async function generateAndUploadQuotePdf(quoteNum, dealId, previousFileId, recordTime) {
     const ctx = `Quote ${quoteNum} (deal ${dealId}) PDF`;
     if (quoteNum === undefined || quoteNum === null || quoteNum === '' || !dealId) {
       fastify.log.warn(`${ctx}: Skipped — missing quoteNum or dealId (quoteNum=${quoteNum}, dealId=${dealId})`);
@@ -383,8 +405,9 @@ async function quoteService(fastify, _) {
       return;
     }
 
-    await deletePreviousQuotePdf({ ctx, previousFileId, fileId });
+    await deletePreviousQuotePdf({ ctx, previousFileId, fileId, quoteNum });
     await normalizeUploadedQuotePdfName({ ctx, uploaded, fileId, fileName });
+    await setPdfState(fastify, 'quote', quoteNum, { fileId, recordTime, dealId });
 
     fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);
   }
@@ -491,7 +514,7 @@ async function quoteService(fastify, _) {
 
         try {
           const searchData = await fastify.backoff(() =>
-            fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
+            fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum], { extraProperties: MATCH_PROPERTIES })
           );
           existRecord = searchData.results?.[0] || null;
           fastify.log.info(`Search completed for quote ${quoteNum}: ${existRecord ? 'Found existing deal ' + existRecord.id : 'No existing deal found'}`);
@@ -500,16 +523,24 @@ async function quoteService(fastify, _) {
           existRecord = null;
         }
 
-        // Fallback: search by deal name
+        // Fallback: search by deal name. Only reuse a deal that doesn't already
+        // belong to another quote or to an order; otherwise a new deal is created.
         if (!existRecord) {
           const dealName = generateDealName(quote);
           try {
             const nameSearch = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('dealname', [dealName])
+              fastify.hubspotAdapter.searchDealsByProperty('dealname', [dealName], { extraProperties: MATCH_PROPERTIES, limit: 20 })
             );
-            existRecord = nameSearch.results?.[0] || null;
+            const { deal, rejected } = pickReusableDealByName(nameSearch.results, { quoteNum });
+            existRecord = deal;
             if (existRecord) {
-              fastify.log.info(`Matched quote ${quoteNum} by deal name to deal ${existRecord.id}`);
+              fastify.log.warn(`NAME_MATCH quote ${quoteNum}: reusing deal ${existRecord.id} found by name "${dealName}" (deal had no Quote Num)`);
+            }
+            if (rejected.length) {
+              fastify.log.warn(
+                `NAME_MATCH_SKIPPED quote ${quoteNum}: ${rejected.length} deal(s) named "${dealName}" belong to other quotes/orders `
+                + `(${rejected.map((d) => `${d.id}: quote ${d.properties?.orderdtl_quotenum || '-'} / order ${d.properties?.orderhed_ordernum || '-'}`).join('; ')}) — creating a new deal`,
+              );
             }
           } catch (searchError) {
             fastify.log.warn(`Deal name search failed for quote ${quoteNum}: ${searchError.message}`);
@@ -547,6 +578,14 @@ async function quoteService(fastify, _) {
           const dealId = existRecord.id;
           let needsCreate = false;
 
+          const existingStage = existRecord.properties?.dealstage;
+          const { protectedStage } = protectClosedDeal(props, existingStage, HUBSPOT_DEAL_STAGES);
+          if (protectedStage) {
+            // Keep the deal where it is: a pipeline change without a stage is rejected by HubSpot.
+            delete props.pipeline;
+            fastify.log.warn(`Quote ${quoteNum}: deal ${dealId} is closed (stage ${existingStage}) — keeping its stage and close date`);
+          }
+
           try {
             const updateProps = { ...props };
             await fastify.backoff(() =>
@@ -568,8 +607,10 @@ async function quoteService(fastify, _) {
           }
 
           if (needsCreate) {
-            if (!isWon && !isLost && !props.dealstage) {
-              props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
+            if (!props.dealstage) {
+              if (isWon) props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_WON;
+              else if (isLost) props.dealstage = HUBSPOT_DEAL_STAGES.CLOSED_LOST;
+              else props.dealstage = HUBSPOT_DEAL_STAGES.QUOTE_CREATED;
             }
             if (props.dealstage !== HUBSPOT_DEAL_STAGES.CLOSED_WON) {
               props.closedate = '';
@@ -584,7 +625,7 @@ async function quoteService(fastify, _) {
 
             await syncQuoteLineItems(quoteNum, newDealId, { skipOrderCheck: true });
             await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, newDealId);
-            await ensureQuotePdfOnDeal(quoteNum, newDealId, props.dealstage);
+            await ensureQuotePdfOnDeal(quoteNum, newDealId, props.dealstage, quote.Calculated_Time);
 
             results.created++;
             continue;
@@ -600,7 +641,7 @@ async function quoteService(fastify, _) {
 
           await syncQuoteLineItems(quoteNum, dealId);
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
-          await ensureQuotePdfOnDeal(quoteNum, dealId, props.dealstage);
+          await ensureQuotePdfOnDeal(quoteNum, dealId, props.dealstage || existingStage, quote.Calculated_Time);
 
           results.updated++;
         } else {
@@ -613,7 +654,7 @@ async function quoteService(fastify, _) {
 
           await syncQuoteLineItems(quoteNum, dealId, { skipOrderCheck: true });
           await associateQuoteToCompany(quoteNum, quote.QuoteHed_CustNum, dealId);
-          await ensureQuotePdfOnDeal(quoteNum, dealId, props.dealstage);
+          await ensureQuotePdfOnDeal(quoteNum, dealId, props.dealstage, quote.Calculated_Time);
 
           results.created++;
         }

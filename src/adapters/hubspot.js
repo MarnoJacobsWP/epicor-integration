@@ -549,11 +549,18 @@ class HubspotAdapter {
     }
   }
 
-  async searchDealsByProperty(propertyName, values) {
+  /**
+   * @param {string} propertyName
+   * @param {Array} values
+   * @param {object} [options]
+   * @param {string[]} [options.extraProperties] - additional deal properties to return
+   * @param {number} [options.limit] - max results per value chunk (default: one per value)
+   */
+  async searchDealsByProperty(propertyName, values, { extraProperties = [], limit } = {}) {
     if (!values.length) {
       return { results: [] };
     }
-    
+
     try {
       const CHUNK_SIZE = 10;
       const valueChunks = [];
@@ -575,8 +582,8 @@ class HubspotAdapter {
         
         const requestBody = {
           filterGroups,
-          properties: [propertyName, 'dealname', 'dealstage', 'pipeline', 'id'],
-          limit: chunk.length
+          properties: [...new Set([propertyName, 'dealname', 'dealstage', 'pipeline', 'id', ...extraProperties])],
+          limit: Math.min(limit || chunk.length, 100)
         };
         
         const response = await this._makeRequest(
