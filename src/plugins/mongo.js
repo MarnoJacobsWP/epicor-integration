@@ -38,6 +38,7 @@ const mongoDBConfiguration = async (fastify, opts) => {
       await fastify.mongo.db.collection('quotes').createIndex({ epicorId: 1 }, { unique: true });
       await fastify.mongo.db.collection('line_items').createIndex({ epicorId: 1 }, { unique: true });
       await fastify.mongo.db.collection('sync_logs').createIndex({ syncType: 1, createdAt: -1 });
+      await fastify.mongo.db.collection('pdf_sync_state').createIndex({ kind: 1, num: 1 }, { unique: true });
       
       fastify.log.debug('MongoDB indexes created');
     } catch (indexError) {

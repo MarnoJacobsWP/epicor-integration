@@ -2,6 +2,14 @@ import fp from 'fastify-plugin';
 import { padCustNum } from '../../../utils/arrayHelpers.js';
 import { toUnixSeconds } from '../../../utils/dateHelper.js';
 import { findDuplicatesOnDeal } from '../../shared/lineItemReconciliation.js';
+import {
+  MATCH_PROPERTIES,
+  isDealReusableByName,
+  numberFromPdfName,
+  pickReusableDealByName,
+  shouldRegeneratePdf,
+} from '../../shared/dealMatching.js';
+import { getPdfState, setPdfState } from '../../shared/pdfSyncState.js';
 
 const toMidnightUTC = (v) => {
   const d = new Date(v);
@@ -167,10 +175,18 @@ async function orderService(fastify, _) {
 
     try {
       const quoteSearchData = await fastify.backoff(() =>
-        fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
+        fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum], { extraProperties: MATCH_PROPERTIES })
       );
-      const quoteDealId = quoteSearchData.results?.[0]?.id;
+      const quoteDeal = quoteSearchData.results?.[0];
+      const quoteDealId = quoteDeal?.id;
       if (!quoteDealId) return;
+
+      if (!isDealReusableByName(quoteDeal, { quoteNum, orderNum })) {
+        fastify.log.warn(
+          `Order ${orderNum}: quote ${quoteNum} deal ${quoteDealId} already belongs to order ${quoteDeal.properties?.orderhed_ordernum} — not updating it`,
+        );
+        return;
+      }
 
       if (currentDealId && String(currentDealId) === String(quoteDealId)) {
         fastify.log.debug(`Order ${orderNum}: Quote ${quoteNum} already resolved to current deal ${currentDealId}, skipping duplicate quote update`);
@@ -183,7 +199,21 @@ async function orderService(fastify, _) {
     }
   }
 
-  async function ensureSalesOrderPdfOnDeal(orderNum, dealId, dealstage) {
+  /**
+   * The sales order number a stored sales_order_pdf file belongs to, e.g.
+   * "Sales Order-207987.pdf" -> "207987". Null when it cannot be determined.
+   */
+  async function orderNumOnPdfFile(fileId) {
+    try {
+      const file = await fastify.backoff(() => fastify.hubspotAdapter.getFileById(fileId));
+      return numberFromPdfName(getHubspotFileName(file), 'order');
+    } catch (error) {
+      fastify.log.warn(`Could not read sales_order_pdf file ${fileId}: ${error.message}`);
+      return null;
+    }
+  }
+
+  async function ensureSalesOrderPdfOnDeal(orderNum, dealId, dealstage, recordTime) {
     if (dealstage !== HUBSPOT_DEAL_STAGES.CLOSED_WON) {
       fastify.log.info(`Order ${orderNum}: Deal ${dealId} stage=${dealstage} — not CLOSED_WON, skipping sales order PDF check`);
       return;
@@ -200,15 +230,20 @@ async function orderService(fastify, _) {
     }
 
     if (existing && String(existing).trim() !== '') {
+      const state = await getPdfState(fastify, 'order', orderNum);
+      if (!shouldRegeneratePdf({ currentFileId: existing, recordTime, state })) {
+        fastify.log.info(`Order ${orderNum}: Deal ${dealId} sales_order_pdf=${existing} is current (order unchanged) — skipping PDF refresh`);
+        return;
+      }
       fastify.log.info(`Order ${orderNum}: Deal ${dealId} already has sales_order_pdf=${existing} — refreshing PDF upload`);
     } else {
       fastify.log.info(`Order ${orderNum}: Deal ${dealId} is CLOSED_WON with no sales_order_pdf — triggering PDF generation`);
     }
 
-    await generateAndUploadSalesOrderPdf(orderNum, dealId, existing);
+    await generateAndUploadSalesOrderPdf(orderNum, dealId, existing, recordTime);
   }
 
-  async function generateAndUploadSalesOrderPdf(orderNum, dealId, previousFileId) {
+  async function generateAndUploadSalesOrderPdf(orderNum, dealId, previousFileId, recordTime) {
     const ctx = `Order ${orderNum} (deal ${dealId}) PDF`;
     if (orderNum === undefined || orderNum === null || orderNum === '' || !dealId) {
       fastify.log.warn(`${ctx}: Skipped — missing orderNum or dealId (orderNum=${orderNum}, dealId=${dealId})`);
@@ -296,7 +331,7 @@ async function orderService(fastify, _) {
       return;
     }
 
-    await deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId });
+    await deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId, orderNum });
 
     const uploadedFileName = getHubspotFileName(uploaded);
     if (uploadedFileName && uploadedFileName !== fileName) {
@@ -313,12 +348,23 @@ async function orderService(fastify, _) {
       }
     }
 
+    await setPdfState(fastify, 'order', orderNum, { fileId, recordTime, dealId });
+
     fastify.log.info(`${ctx}: SUCCESS — PDF attached in ${Date.now() - startedAt}ms (fileId=${fileId})`);
   }
 
-  async function deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId }) {
+  async function deletePreviousSalesOrderPdf({ ctx, previousFileId, fileId, orderNum }) {
     const previousId = previousFileId == null ? '' : String(previousFileId).trim();
     if (!previousId || previousId === String(fileId)) {
+      return;
+    }
+
+    // Only delete a file that belongs to this same order.
+    const fileOrderNum = await orderNumOnPdfFile(previousId);
+    if (fileOrderNum !== String(orderNum).trim()) {
+      fastify.log.warn(
+        `${ctx}: Keeping previous HubSpot file ${previousId} (belongs to order ${fileOrderNum || 'unknown'}, not ${orderNum})`,
+      );
       return;
     }
 
@@ -429,14 +475,19 @@ async function orderService(fastify, _) {
           existRecord = null;
         }
 
-        // Also search by quote number if available
+        // Also search by quote number if available. The quote's deal is only
+        // taken over when it doesn't already belong to a different order.
         if (quoteNum) {
           try {
             const quoteSearch = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum])
+              fastify.hubspotAdapter.searchDealsByProperty('orderdtl_quotenum', [quoteNum], { extraProperties: MATCH_PROPERTIES })
             );
-            if (quoteSearch.results?.[0]) {
-              const quoteDeal = quoteSearch.results[0];
+            const quoteDeal = quoteSearch.results?.[0];
+            if (quoteDeal && !isDealReusableByName(quoteDeal, { quoteNum, orderNum })) {
+              fastify.log.warn(
+                `Order ${orderNum}: quote ${quoteNum} deal ${quoteDeal.id} already belongs to order ${quoteDeal.properties?.orderhed_ordernum} — not taking it over`,
+              );
+            } else if (quoteDeal) {
               const existingDealId = existRecord?.id;
               if (!existingDealId || String(existingDealId) !== String(quoteDeal.id)) {
                 existRecord = quoteDeal;
@@ -449,16 +500,24 @@ async function orderService(fastify, _) {
           }
         }
 
-        // Fallback: search by deal name
+        // Fallback: search by deal name. Only reuse a deal that doesn't already
+        // belong to another order or another quote; otherwise a new deal is created.
         if (!existRecord) {
           const dealName = generateDealName(order);
           try {
             const nameSearch = await fastify.backoff(() =>
-              fastify.hubspotAdapter.searchDealsByProperty('dealname', [dealName])
+              fastify.hubspotAdapter.searchDealsByProperty('dealname', [dealName], { extraProperties: MATCH_PROPERTIES, limit: 20 })
             );
-            existRecord = nameSearch.results?.[0] || null;
+            const { deal, rejected } = pickReusableDealByName(nameSearch.results, { quoteNum, orderNum });
+            existRecord = deal;
             if (existRecord) {
-              fastify.log.info(`Order ${orderNum} matched deal by name ${existRecord.id}`);
+              fastify.log.warn(`NAME_MATCH order ${orderNum}: reusing deal ${existRecord.id} found by name "${dealName}"`);
+            }
+            if (rejected.length) {
+              fastify.log.warn(
+                `NAME_MATCH_SKIPPED order ${orderNum}: ${rejected.length} deal(s) named "${dealName}" belong to other quotes/orders `
+                + `(${rejected.map((d) => `${d.id}: quote ${d.properties?.orderdtl_quotenum || '-'} / order ${d.properties?.orderhed_ordernum || '-'}`).join('; ')}) — creating a new deal`,
+              );
             }
           } catch (searchError) {
             fastify.log.warn(`Order ${orderNum} deal name search failed: ${searchError.message}`);
@@ -513,7 +572,7 @@ async function orderService(fastify, _) {
             await syncOrderLineItems(orderNum, quoteNum, newDealId);
             await associateOrderToCompany(orderNum, order.OrderHed_CustNum, newDealId);
             await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, newDealId);
-            await ensureSalesOrderPdfOnDeal(orderNum, newDealId, props.dealstage);
+            await ensureSalesOrderPdfOnDeal(orderNum, newDealId, props.dealstage, order.Calculated_Time);
 
             results.created++;
             continue;
@@ -524,7 +583,7 @@ async function orderService(fastify, _) {
           await syncOrderLineItems(orderNum, quoteNum, dealId);
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, dealId);
-          await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage);
+          await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage, order.Calculated_Time);
 
           results.updated++;
         } else {
@@ -538,7 +597,7 @@ async function orderService(fastify, _) {
           await syncOrderLineItems(orderNum, quoteNum, dealId);
           await associateOrderToCompany(orderNum, order.OrderHed_CustNum, dealId);
           await checkAndUpdateMatchingQuote(quoteNum, orderNum, usedQuoteDeal, dealId);
-          await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage);
+          await ensureSalesOrderPdfOnDeal(orderNum, dealId, props.dealstage, order.Calculated_Time);
 
           results.created++;
         }
